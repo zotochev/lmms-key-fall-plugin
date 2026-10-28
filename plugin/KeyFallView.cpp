@@ -37,7 +37,10 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <chrono>
+#include <functional>
 
+#include "FallCanvas.h"
 #include "KeyFall.h"
 #include "KeyboardWidget.h"
 #include "MidiPortMenu.h"
@@ -46,32 +49,53 @@ namespace lmms::gui {
 
 namespace {
 
-constexpr int InputPollIntervalMs = 16; // ~60 Hz, also the future animation tick
+constexpr int FrameIntervalMs = 16; // ~60 Hz
 
-const QString FallAreaStyle = QStringLiteral("QLabel { background-color: #1e2226; color: #8a8f98; padding: 24px; }");
+std::int64_t nowNs()
+{
+	return std::chrono::duration_cast<std::chrono::nanoseconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+//! Clips can be added or moved at any time without a signal we could use,
+//! so the list is rebuilt right before it opens.
+class ClipCombo : public QComboBox
+{
+public:
+	std::function<void()> beforePopup;
+
+	void showPopup() override
+	{
+		if (beforePopup) { beforePopup(); }
+		QComboBox::showPopup();
+	}
+};
 
 } // namespace
 
 KeyFallView::KeyFallView(KeyFall* plugin)
 	: ToolPluginView(plugin)
 	, m_plugin(plugin)
-	, m_clipCombo(new QComboBox())
+	, m_clipCombo(new ClipCombo())
 	, m_layoutCombo(new QComboBox())
 	, m_midiInButton(new QToolButton())
 	, m_midiInMenu(new MidiPortMenu(MidiPort::Mode::Input))
 	, m_lastEventLabel(new QLabel())
-	, m_fallArea(new QLabel())
 	, m_keyboard(new KeyboardWidget())
 {
-	m_fallArea->setStyleSheet(FallAreaStyle);
-	m_fallArea->setAlignment(Qt::AlignCenter);
-	m_fallArea->setWordWrap(true);
+	m_fall = new FallCanvas(m_keyboard);
+	m_fall->setLookaheadSeconds(m_plugin->lookaheadSeconds());
+	m_fall->onLookaheadStep = [this](int step) {
+		m_plugin->setLookaheadSeconds(m_plugin->lookaheadSeconds() * (step > 0 ? 1.25 : 0.8));
+		m_fall->setLookaheadSeconds(m_plugin->lookaheadSeconds());
+	};
+	m_fall->setToolTip(tr("Ctrl + mouse wheel: show more or less time ahead"));
 
 	auto mainLayout = new QVBoxLayout(this);
 	mainLayout->setContentsMargins(0, 0, 0, 0);
 	mainLayout->setSpacing(0);
 	mainLayout->addWidget(createToolbar());
-	mainLayout->addWidget(m_fallArea, 1);
+	mainLayout->addWidget(m_fall, 1);
 	mainLayout->addWidget(m_keyboard);
 
 	setMinimumSize(MinWidth, MinHeight);
@@ -79,12 +103,14 @@ KeyFallView::KeyFallView(KeyFall* plugin)
 
 	// Model -> view connections live in modelChanged(): Plugin::createView() calls setModel()
 	// after construction, and ModelView::setModel() disconnects the model from this widget.
-	connect(&m_inputTimer, &QTimer::timeout, this, &KeyFallView::pollInput);
-	m_inputTimer.setTimerType(Qt::PreciseTimer);
-	m_inputTimer.setInterval(InputPollIntervalMs);
+	connect(&m_frameTimer, &QTimer::timeout, this, &KeyFallView::tick);
+	m_frameTimer.setTimerType(Qt::PreciseTimer);
+	m_frameTimer.setInterval(FrameIntervalMs);
 
 	populateLayoutCombo();
+	populateClipCombo();
 	onLayoutChanged();
+	onChartChanged();
 	updateMidiInState();
 
 	// MainWindow creates every tool view at startup and shows it from the Tools menu.
@@ -102,9 +128,12 @@ QWidget* KeyFallView::createToolbar()
 	auto layout = new QHBoxLayout(toolbar);
 	layout->setContentsMargins(6, 4, 6, 4);
 
-	m_clipCombo->addItem(tr("No clip selected"));
-	m_clipCombo->setEnabled(false);
-	m_clipCombo->setToolTip(tr("MIDI clip to practise"));
+	m_clipCombo->setToolTip(tr("Instrument-track clip to practise"));
+	m_clipCombo->setMinimumContentsLength(18);
+	static_cast<ClipCombo*>(m_clipCombo)->beforePopup = [this] { populateClipCombo(); };
+	connect(m_clipCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
+		m_plugin->selectClip(index > 0 && index < m_clipItems.size() ? m_clipItems[index].data() : nullptr);
+	});
 
 	m_layoutCombo->setToolTip(tr("Your instrument: keyboard size, pads, ..."));
 	m_layoutCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
@@ -184,11 +213,16 @@ void KeyFallView::modelChanged()
 	ToolPluginView::modelChanged();
 	connect(m_plugin, &KeyFall::layoutChanged, this, &KeyFallView::onLayoutChanged, Qt::UniqueConnection);
 	connect(m_plugin, &KeyFall::layoutsReloaded, this, &KeyFallView::populateLayoutCombo, Qt::UniqueConnection);
+	connect(m_plugin, &KeyFall::chartChanged, this, &KeyFallView::onChartChanged, Qt::UniqueConnection);
+	connect(m_plugin, &KeyFall::transportJumped, this, [this] { m_clock.reset(); });
 }
 
 void KeyFallView::populateLayoutCombo()
 {
 	m_layoutCombo->clear();
+	m_layoutCombo->addItem(tr("Auto (fit to the clip)"), KeyFall::AutoLayoutId);
+	m_layoutCombo->setItemData(0, tr("A piano keyboard covering the notes of the selected clip"), Qt::ToolTipRole);
+
 	auto* model = qobject_cast<QStandardItemModel*>(m_layoutCombo->model());
 	for (const auto& entry : m_plugin->layouts().entries())
 	{
@@ -209,12 +243,38 @@ void KeyFallView::populateLayoutCombo()
 	m_layoutCombo->setCurrentIndex(m_layoutCombo->findData(m_plugin->currentLayoutId()));
 }
 
+void KeyFallView::populateClipCombo()
+{
+	m_clipCombo->clear();
+	m_clipItems.clear();
+	m_clipCombo->addItem(tr("Choose a clip to practise…"));
+	m_clipItems.push_back(nullptr);
+	for (const auto& choice : m_plugin->listClips())
+	{
+		m_clipCombo->addItem(choice.label);
+		m_clipItems.push_back(choice.clip);
+		if (choice.clip == m_plugin->currentClip()) { m_clipCombo->setCurrentIndex(m_clipCombo->count() - 1); }
+	}
+	if (m_clipCombo->count() == 1) { m_clipCombo->setItemText(0, tr("No instrument clips in this project")); }
+}
+
 void KeyFallView::onLayoutChanged()
 {
 	m_resolver.setLayout(m_plugin->currentLayout().get());
 	m_keyboard->setInstrumentLayout(m_plugin->currentLayout());
+	m_fall->clearPresses(); // ghost bars refer to controls of the old layout
+	m_expected.clear();
 	const int index = m_layoutCombo->findData(m_plugin->currentLayoutId());
 	if (index >= 0) { m_layoutCombo->setCurrentIndex(index); }
+	m_fall->update();
+}
+
+void KeyFallView::onChartChanged()
+{
+	m_fall->setChart(m_plugin->chart());
+	if (!m_plugin->currentClip()) { m_clipCombo->setCurrentIndex(0); }
+	m_lastShownTick = -1e300;
+	updateMessage();
 }
 
 void KeyFallView::updateMidiInState()
@@ -224,24 +284,56 @@ void KeyFallView::updateMidiInState()
 	if (available.isEmpty())
 	{
 		m_midiInButton->setText(tr("MIDI in: no devices"));
-		m_fallArea->setText(tr("No MIDI input device found.\n\nConnect a MIDI keyboard and choose a MIDI backend in "
-			"Edit → Settings → MIDI, then restart LMMS.\nWithout a keyboard you can use a virtual MIDI "
-			"cable (e.g. loopMIDI) and scripts/virtual_player.py."));
+		m_midiProblem = tr("No MIDI input device found. Connect a MIDI keyboard and choose a MIDI backend in "
+			"Edit → Settings → MIDI, then restart LMMS. Without a keyboard you can use a virtual MIDI "
+			"cable (e.g. loopMIDI) and scripts/virtual_player.py.");
 	}
 	else if (subscribed.isEmpty())
 	{
 		m_midiInButton->setText(tr("MIDI in: none selected"));
-		m_fallArea->setText(tr("Choose your MIDI keyboard in the “MIDI in” menu above."));
+		m_midiProblem = tr("Choose your MIDI keyboard in the “MIDI in” menu above.");
 	}
 	else
 	{
 		m_midiInButton->setText(subscribed.size() == 1 ? tr("MIDI in: %1").arg(subscribed.front())
 			: tr("MIDI in: %1 devices").arg(subscribed.size()));
-		m_fallArea->setText(tr("Play on your keyboard: pressed keys light up below.\n"
-			"Falling notes of the selected clip will appear here."));
+		m_midiProblem.clear();
 	}
 	m_midiInButton->setToolTip(available.isEmpty() ? tr("No MIDI input devices found")
 		: tr("Devices KeyFall listens to (it never changes what your tracks hear)"));
+	updateMessage();
+}
+
+void KeyFallView::updateMessage()
+{
+	QString message;
+	if (!m_plugin->currentClip())
+	{
+		message = tr("Choose a clip to practise in “Clip” above, then press Play in LMMS (Space).\n"
+			"You can already play: pressed keys light up below.");
+		if (!m_midiProblem.isEmpty()) { message += "\n\n" + m_midiProblem; }
+	}
+	else if (m_plugin->chart()->empty())
+	{
+		message = tr("This clip has no notes. Pick another one or draw some in the Piano Roll.");
+	}
+	else if (!m_supportedMode)
+	{
+		message = tr("Playback from the Pattern Editor is not supported yet.\n"
+			"Play the song in the Song Editor, or the clip in the Piano Roll.");
+	}
+	else if (!m_midiProblem.isEmpty())
+	{
+		// The waterfall still works; the problem is shown but does not block it
+		message.clear();
+	}
+	m_fall->setMessage(message);
+}
+
+void KeyFallView::tick()
+{
+	pollInput();
+	updateTransport();
 }
 
 void KeyFallView::pollInput()
@@ -250,8 +342,63 @@ void KeyFallView::pollInput()
 	for (const auto& event : m_inputBuffer)
 	{
 		const auto press = m_resolver.resolve(event);
-		if (press && press->control) { m_keyboard->setPressed(*press->control, press->on ? std::max<std::uint8_t>(press->velocity, 1) : 0); }
+		if (press && press->control)
+		{
+			m_keyboard->setPressed(*press->control, press->on ? std::max<std::uint8_t>(press->velocity, 1) : 0);
+			m_fall->notePress(*press->control, press->on, press->timeNs);
+		}
 		showLastEvent(event, !press || press->control.has_value());
+	}
+}
+
+void KeyFallView::updateTransport()
+{
+	const TransportSample s = m_plugin->sampleTransport();
+	if (s.supportedMode != m_supportedMode)
+	{
+		m_supportedMode = s.supportedMode;
+		updateMessage();
+	}
+
+	const std::int64_t now = nowNs();
+	double tick = m_clock.update(s.chartTick, now, s.ticksPerSecond, s.playing);
+	// The song position runs about one buffer ahead of what is audible
+	if (s.playing) { tick -= s.latencyTicks; }
+
+	if (tick != m_lastShownTick || s.playing)
+	{
+		m_lastShownTick = tick;
+		FallCanvas::Timeline t;
+		t.now = tick;
+		t.ticksPerSecond = s.ticksPerSecond;
+		t.ticksPerBar = s.ticksPerBar;
+		t.beatsPerBar = s.beatsPerBar;
+		t.songTickOfChartZero = s.songTickOfChartZero;
+		t.playing = s.playing;
+		m_fall->setTimeline(t);
+
+		// Keys whose notes are sounding at the hit line get the "play me" band
+		const auto* layout = m_keyboard->instrumentLayout();
+		const auto chart = m_plugin->chart();
+		std::vector<bool> expected(layout ? layout->controls().size() : 0, false);
+		if (layout)
+		{
+			const auto& notes = chart->notes();
+			for (std::size_t i = chart->firstVisible(tick); i < notes.size() && notes[i].start <= tick; ++i)
+			{
+				const auto c = layout->candidates(notes[i].key);
+				if (notes[i].end() > tick && !c.empty()) { expected[c.front()] = true; }
+			}
+		}
+		if (expected != m_expected)
+		{
+			m_expected = expected;
+			m_keyboard->setExpected(m_expected);
+		}
+	}
+	else if (m_fall->isAnimating(now))
+	{
+		m_fall->update(); // ghost bars move with the wall clock
 	}
 }
 
@@ -281,13 +428,16 @@ void KeyFallView::showEvent(QShowEvent* event)
 	ToolPluginView::showEvent(event);
 	m_plugin->drainInput(m_inputBuffer); // ignore whatever was played while hidden
 	m_keyboard->releaseAll();
+	m_fall->clearPresses();
+	populateClipCombo();
 	updateMidiInState();
-	m_inputTimer.start();
+	m_clock.reset();
+	m_frameTimer.start();
 }
 
 void KeyFallView::hideEvent(QHideEvent* event)
 {
-	m_inputTimer.stop();
+	m_frameTimer.stop();
 	ToolPluginView::hideEvent(event);
 }
 

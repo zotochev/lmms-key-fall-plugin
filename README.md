@@ -30,6 +30,12 @@ KeyFall draws your keyboard (or pads) from a `*.kflayout.json` file. To add your
 2. Start LMMS with `scripts\lmms.cmd run`. For the instrument track to sound, click once in its instrument window: LMMS auto-assigns the `lmms` port when the instrument gets focus. Alternatively, use the track's ⚙ → MIDI → Input menu.
 3. Play into it:
 
+A ready-made test project with a melody and chords; the track's MIDI input is already connected to `lmms`:
+
+```bat
+python scripts\make_test_song.py      :: then in LMMS: File > Open > key-fall\dev\test-song.mmp
+```
+
 ```bat
 python scripts\virtual_player.py --list
 python scripts\virtual_player.py --port lmms chords

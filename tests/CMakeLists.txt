@@ -14,7 +14,8 @@ endif()
 set(KEYFALL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(CORE_DIR "${KEYFALL_ROOT}/plugin/core")
 
-add_library(keyfall_core STATIC "${CORE_DIR}/Json.cpp" "${CORE_DIR}/KeyboardLayout.cpp" "${CORE_DIR}/InputResolver.cpp")
+add_library(keyfall_core STATIC "${CORE_DIR}/Json.cpp" "${CORE_DIR}/KeyboardLayout.cpp" "${CORE_DIR}/InputResolver.cpp"
+	"${CORE_DIR}/Chart.cpp" "${CORE_DIR}/PlayheadClock.cpp")
 target_include_directories(keyfall_core PUBLIC "${CORE_DIR}")
 
 add_executable(core_tests core_tests.cpp)

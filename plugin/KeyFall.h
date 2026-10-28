@@ -25,19 +25,43 @@
 #ifndef LMMS_KEYFALL_H
 #define LMMS_KEYFALL_H
 
+#include <QPointer>
 #include <QStringList>
+#include <QVector>
 #include <memory>
 #include <mutex>
 #include <vector>
 
 #include "KeyFallView.h"
 #include "LayoutRepository.h"
+#include "MidiClip.h"
 #include "MidiEventProcessor.h"
 #include "MidiPort.h"
 #include "ToolPlugin.h"
+#include "core/Chart.h"
 #include "core/InputResolver.h"
 
 namespace lmms {
+
+//! One clip the user can practise
+struct ClipChoice
+{
+	QPointer<MidiClip> clip;
+	QString label; //!< "Track > clip (bars a-b)"
+};
+
+//! Snapshot of the LMMS transport, already mapped onto the chart timeline
+struct TransportSample
+{
+	double chartTick = 0;      //!< host position in chart ticks (0 = clip's left edge), per audio buffer
+	double ticksPerSecond = 96;
+	double latencyTicks = 0;   //!< the song position runs ahead of what is audible by about one buffer
+	bool playing = false;
+	bool supportedMode = true; //!< false while the Pattern editor plays
+	int ticksPerBar = 192;
+	int beatsPerBar = 4;
+	double songTickOfChartZero = 0; //!< for bar numbers and grid alignment
+};
 
 //! Tool plugin model. Lives for the whole LMMS session (created at startup,
 //! survives project reloads) and is never saved into a project: per-user
@@ -92,15 +116,37 @@ public:
 	void reloadLayouts();
 	QString currentLayoutId() const { return m_currentLayoutId; }
 	std::shared_ptr<const kf::layout::KeyboardLayout> currentLayout() const { return m_currentLayout; }
-	//! Selects and persists a layout; unknown ids fall back to the default keyboard
+	//! Selects and persists a layout; unknown ids fall back to the default keyboard.
+	//! AutoLayoutId is a piano fitted to the current clip's range.
 	void selectLayout(const QString& id);
+	static const QString AutoLayoutId;
+
+	// --- Practised clip and transport -------------------------------------
+
+	//! Instrument-track clips of the current song (Pattern editor clips are not supported yet)
+	QVector<ClipChoice> listClips() const;
+	MidiClip* currentClip() const { return m_clip; }
+	void selectClip(MidiClip* clip);
+	std::shared_ptr<const kf::Chart> chart() const { return m_chart; }
+	const kf::ChartStats& chartStats() const { return m_chartStats; }
+
+	TransportSample sampleTransport() const;
+
+	//! Seconds of music visible above the hit line
+	double lookaheadSeconds() const { return m_lookaheadSeconds; }
+	void setLookaheadSeconds(double seconds);
 
 signals:
 	void layoutChanged();
 	void layoutsReloaded();
+	void chartChanged();
+	//! Seek, loop wrap, start/stop: smoothing must restart from the host position
+	void transportJumped();
 
 private:
 	void restoreMidiInputs();
+	void rebuildChart();
+	void applyLayout(const QString& id, bool persist);
 
 	MidiPort m_midiPort;
 	Tolerance m_tolerance = Tolerance::Normal;
@@ -113,6 +159,12 @@ private:
 	LayoutRepository m_layouts;
 	QString m_currentLayoutId;
 	std::shared_ptr<const kf::layout::KeyboardLayout> m_currentLayout;
+
+	QPointer<MidiClip> m_clip;
+	QVector<QMetaObject::Connection> m_clipConnections;
+	std::shared_ptr<const kf::Chart> m_chart;
+	kf::ChartStats m_chartStats;
+	double m_lookaheadSeconds = 3.0;
 };
 
 } // namespace lmms

@@ -50,6 +50,9 @@ public:
 	void setPressed(std::uint16_t control, std::uint8_t velocity);
 	void releaseAll();
 
+	//! Controls whose chart notes are sounding now get a yellow "play me" band
+	void setExpected(const std::vector<bool>& expected);
+
 	//! Control geometry in widget coordinates
 	QRectF controlRect(std::uint16_t control) const;
 
@@ -64,6 +67,7 @@ private:
 
 	std::shared_ptr<const kf::layout::KeyboardLayout> m_layout;
 	std::vector<std::uint8_t> m_pressed; //!< velocity per control, 0 = up
+	std::vector<bool> m_expected;
 	QPixmap m_cache;
 	bool m_cacheValid = false;
 	// layout units -> widget pixels

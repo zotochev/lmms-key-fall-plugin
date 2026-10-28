@@ -25,11 +25,14 @@
 #ifndef LMMS_GUI_KEYFALL_VIEW_H
 #define LMMS_GUI_KEYFALL_VIEW_H
 
+#include <QPointer>
 #include <QTimer>
+#include <QVector>
 #include <vector>
 
 #include "ToolPluginView.h"
 #include "core/InputResolver.h"
+#include "core/PlayheadClock.h"
 
 class QComboBox;
 class QLabel;
@@ -39,14 +42,16 @@ class QWidget;
 
 namespace lmms {
 class KeyFall;
+class MidiClip;
 }
 
 namespace lmms::gui {
 
+class FallCanvas;
 class KeyboardWidget;
 class MidiPortMenu;
 
-//! Main window: toolbar on top, falling-notes area in the middle and the
+//! Main window: toolbar on top, falling notes in the middle and the
 //! instrument (keyboard, pads, ...) at the bottom.
 class KeyFallView : public ToolPluginView
 {
@@ -71,9 +76,16 @@ private:
 	void updateKeyboardHeight();
 
 	void populateLayoutCombo();
+	void populateClipCombo();
 	void onLayoutChanged();
+	void onChartChanged();
 	void updateMidiInState();
+	void updateMessage();
+
+	//! Frame tick (~60 Hz while visible): MIDI input, transport, animation
+	void tick();
 	void pollInput();
+	void updateTransport();
 	void showLastEvent(const kf::MidiInputEvent& event, bool insideLayout);
 
 	KeyFall* m_plugin;
@@ -82,12 +94,18 @@ private:
 	QToolButton* m_midiInButton;
 	MidiPortMenu* m_midiInMenu;
 	QLabel* m_lastEventLabel;
-	QLabel* m_fallArea;
+	FallCanvas* m_fall;
 	KeyboardWidget* m_keyboard;
 
-	QTimer m_inputTimer;
+	QTimer m_frameTimer;
 	kf::InputResolver m_resolver;
 	std::vector<kf::MidiInputEvent> m_inputBuffer;
+	kf::PlayheadClock m_clock;
+	QVector<QPointer<MidiClip>> m_clipItems; //!< clip per combo row (row 0 = "choose a clip")
+	QString m_midiProblem;                   //!< empty when a MIDI input is selected
+	bool m_supportedMode = true;
+	double m_lastShownTick = -1e300;
+	std::vector<bool> m_expected;
 };
 
 } // namespace lmms::gui

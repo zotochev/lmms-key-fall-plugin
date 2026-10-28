@@ -44,6 +44,7 @@ const QColor KeyBorder{0x8a, 0x8f, 0x98};
 const QColor PadFill{0x3a, 0x40, 0x48};
 const QColor PadLabel{0xc0, 0xc4, 0xca};
 const QColor Pressed{0x56, 0xb4, 0xe9};
+const QColor ExpectedBand{0xf0, 0xe4, 0x42, 220};
 
 constexpr int Margin = 2;
 constexpr double MinLabelWidth = 14.0; // px; narrower keys get no label
@@ -62,6 +63,7 @@ void KeyboardWidget::setInstrumentLayout(std::shared_ptr<const kf::layout::Keybo
 {
 	m_layout = std::move(layout);
 	m_pressed.assign(m_layout ? m_layout->controls().size() : 0, 0);
+	m_expected.assign(m_pressed.size(), false);
 	updateMapping();
 	m_cacheValid = false;
 	update();
@@ -77,6 +79,14 @@ void KeyboardWidget::setPressed(std::uint16_t control, std::uint8_t velocity)
 void KeyboardWidget::releaseAll()
 {
 	std::fill(m_pressed.begin(), m_pressed.end(), 0);
+	update();
+}
+
+void KeyboardWidget::setExpected(const std::vector<bool>& expected)
+{
+	if (expected == m_expected) { return; }
+	m_expected = expected;
+	m_expected.resize(m_pressed.size(), false);
 	update();
 }
 
@@ -195,14 +205,26 @@ void KeyboardWidget::paintEvent(QPaintEvent*)
 	p.setFont(f);
 	const auto& controls = m_layout->controls();
 
+	const auto expected = [&](std::size_t i) { return i < m_expected.size() && m_expected[i]; };
+	const auto paintState = [&](std::size_t i) {
+		paintControl(p, controls[i], m_pressed[i] != 0);
+		if (expected(i) && !m_pressed[i])
+		{
+			// "Play me": a band on the visible lower part of the key
+			const QRectF r = controlRect(static_cast<std::uint16_t>(i));
+			const QRectF band(r.left() + 1, r.bottom() - r.height() * 0.28, r.width() - 2, r.height() * 0.28 - 1);
+			p.fillRect(band, ExpectedBand);
+		}
+	};
+
 	// A highlighted white key would cover its black neighbours, so those are repainted on top
-	std::vector<QRectF> pressedWhites;
+	std::vector<QRectF> changedWhites;
 	for (std::size_t i = 0; i < controls.size(); ++i)
 	{
-		if (m_pressed[i] && controls[i].shape == Shape::PianoWhite)
+		if ((m_pressed[i] || expected(i)) && controls[i].shape == Shape::PianoWhite)
 		{
-			paintControl(p, controls[i], true);
-			pressedWhites.push_back(controlRect(static_cast<std::uint16_t>(i)));
+			paintState(i);
+			changedWhites.push_back(controlRect(static_cast<std::uint16_t>(i)));
 		}
 	}
 	for (std::size_t i = 0; i < controls.size(); ++i)
@@ -210,9 +232,9 @@ void KeyboardWidget::paintEvent(QPaintEvent*)
 		const auto& c = controls[i];
 		if (c.shape == Shape::PianoWhite) { continue; }
 		const QRectF r = controlRect(static_cast<std::uint16_t>(i));
-		const bool coversPressedWhite = c.shape == Shape::PianoBlack
-			&& std::any_of(pressedWhites.begin(), pressedWhites.end(), [&](const QRectF& w) { return w.intersects(r); });
-		if (m_pressed[i] || coversPressedWhite) { paintControl(p, c, m_pressed[i] != 0); }
+		const bool coversChangedWhite = c.shape == Shape::PianoBlack
+			&& std::any_of(changedWhites.begin(), changedWhites.end(), [&](const QRectF& w) { return w.intersects(r); });
+		if (m_pressed[i] || expected(i) || coversChangedWhite) { paintState(i); }
 	}
 }
 

@@ -28,7 +28,9 @@
 #include <string>
 #include <vector>
 
+#include "Chart.h"
 #include "InputResolver.h"
+#include "PlayheadClock.h"
 #include "Json.h"
 #include "KeyboardLayout.h"
 
@@ -230,6 +232,86 @@ void testInputResolver()
 	CHECK(!kf::InputResolver().resolve({0, 0x90, 1, 60, 1})->control); // no layout yet
 }
 
+void testChartBuild()
+{
+	using kf::Chart;
+	using kf::RawNote;
+	kf::ChartStats stats;
+	// Clip of 2 bars (384 ticks), left edge trimmed by one beat: startTimeOffset = -48
+	const std::vector<RawNote> raw = {
+		{0, 48, 60, 100},    // before the trimmed left edge: hidden
+		{48, 96, 62, 100},   // chart tick 0
+		{96, 96, 64, 80},    // overlaps the next E4: trimmed to 48
+		{144, 48, 64, 80},
+		{144, 48, 64, 80},   // exact duplicate: dropped
+		{200, 0, 67, 90},    // step note: minimal length
+		{440, 48, 72, 100},  // past the right edge (pos >= 384 + 48): hidden
+		{420, 200, 71, 100}, // starts inside, runs past the edge: cut at the clip end
+	};
+	const Chart c = Chart::build(raw, 384, -48, &stats);
+	CHECK(stats.outsideClip == 2);
+	CHECK(stats.overlapsTrimmed == 1);
+	CHECK(stats.duplicatesDropped == 1);
+	CHECK(stats.shortExtended == 1);
+	CHECK(c.notes().size() == 5);
+	if (c.notes().size() != 5) { return; }
+	CHECK(c.notes()[0].start == 0 && c.notes()[0].key == 62);
+	CHECK(c.notes()[1].key == 64 && c.notes()[1].length == 48);
+	CHECK(c.notes()[3].key == 67 && c.notes()[3].length == Chart::MinLength);
+	CHECK(c.notes()[4].key == 71 && c.notes()[4].end() <= 384 + 1e-9);
+	CHECK(c.keyRange() == std::make_pair(62, 71));
+	// sorted by start
+	for (std::size_t i = 1; i < c.notes().size(); ++i) { CHECK(c.notes()[i - 1].start <= c.notes()[i].start); }
+	// firstVisible never skips a note that is still sounding
+	for (double t = 0; t < 384; t += 7)
+	{
+		const auto first = c.firstVisible(t);
+		for (std::size_t i = 0; i < first; ++i) { CHECK(c.notes()[i].end() <= t); }
+	}
+	CHECK(Chart::build({}, 192, 0).empty());
+}
+
+void testAutoKeyRange()
+{
+	CHECK(kf::autoKeyRange(60, 67) == std::make_pair(48, 71));   // C3..B4: at least two octaves
+	CHECK(kf::autoKeyRange(40, 84) == std::make_pair(36, 95));   // E2..C6 -> C2..B6
+	CHECK(kf::autoKeyRange(0, 3) == std::make_pair(0, 23));
+	const auto top = kf::autoKeyRange(120, 127);
+	CHECK(top.second == 127 && top.first % 12 == 0);
+	CHECK(kf::autoKeyRange(0, -1) == std::make_pair(48, 72));    // empty clip
+}
+
+void testPlayheadClock()
+{
+	constexpr std::int64_t Ms = 1000000;
+	const double tps = 96; // 120 bpm
+	kf::PlayheadClock clock;
+
+	// Stopped: shows the host position as is
+	CHECK(clock.update(10, 0, tps, false) == 10);
+
+	// Playing: host updates every 10 ms (one buffer), frames every 4 ms
+	double prev = clock.update(10, 0, tps, true);
+	double maxError = 0;
+	for (std::int64_t t = 4; t <= 1000; t += 4)
+	{
+		const double raw = 10 + std::floor(t / 10.0) * 10 * tps / 1000; // stepwise host position
+		const double shown = clock.update(raw, t * Ms, tps, true);
+		CHECK(shown >= prev); // never runs backwards
+		maxError = std::max(maxError, std::abs(shown - (10 + t * tps / 1000)));
+		prev = shown;
+	}
+	CHECK(maxError < 0.02 * tps); // within 20 ms of the true position
+
+	// Loop wrap: snaps back immediately
+	CHECK(clock.update(5, 1004 * Ms, tps, true) == 5);
+	// Engine stalls: extrapolation is capped
+	const double stalled = clock.update(5, 3000 * Ms, tps, true);
+	CHECK(stalled <= 5 + kf::PlayheadClock::MaxExtrapolationSeconds * tps + 1e-9);
+	// Big forward seek: snaps
+	CHECK(clock.update(500, 3004 * Ms, tps, true) == 500);
+}
+
 } // namespace
 
 int main()
@@ -245,6 +327,9 @@ int main()
 		{"migration v1", testMigrationV1},
 		{"errors", testErrors},
 		{"input resolver", testInputResolver},
+		{"chart build", testChartBuild},
+		{"auto key range", testAutoKeyRange},
+		{"playhead clock", testPlayheadClock},
 	};
 	for (const auto& [name, fn] : tests)
 	{

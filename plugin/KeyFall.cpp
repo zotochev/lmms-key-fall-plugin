@@ -24,13 +24,17 @@
 
 #include "KeyFall.h"
 
+#include <algorithm>
 #include <chrono>
 
 #include "AudioEngine.h"
 #include "ConfigManager.h"
 #include "Engine.h"
+#include "InstrumentTrack.h"
 #include "MidiClient.h"
 #include "MidiEvent.h"
+#include "Note.h"
+#include "Song.h"
 #include "embed.h"
 #include "plugin_export.h"
 
@@ -55,9 +59,13 @@ const auto ConfigSection = QStringLiteral("keyfall");
 const auto ToleranceKey = QStringLiteral("tolerance");
 const auto MidiInputsKey = QStringLiteral("midiinputs");
 const auto LayoutKey = QStringLiteral("layout");
+const auto LookaheadKey = QStringLiteral("lookahead");
 // Port names go into an XML attribute, where newlines would not survive
 const QChar MidiInputSeparator = QLatin1Char(';');
+//! Fallback when a saved layout id no longer exists
 const auto DefaultLayoutId = QStringLiteral("generic-61");
+constexpr double MinLookahead = 1.5;
+constexpr double MaxLookahead = 8.0;
 // Drop input rather than grow without bound if the window is hidden for long
 constexpr std::size_t MaxQueuedEvents = 4096;
 
@@ -86,14 +94,27 @@ std::int64_t nowNs()
 
 } // namespace
 
+const QString KeyFall::AutoLayoutId = QStringLiteral("auto");
+
 KeyFall::KeyFall()
 	: ToolPlugin(&keyfall_plugin_descriptor, nullptr)
 	, m_midiPort(QStringLiteral("KeyFall"), Engine::audioEngine()->midiClient(), this, this, MidiPort::Mode::Input)
 	, m_tolerance(toleranceFromString(ConfigManager::inst()->value(ConfigSection, ToleranceKey)))
+	, m_chart(std::make_shared<const kf::Chart>())
 {
+	bool ok = false;
+	const double lookahead = ConfigManager::inst()->value(ConfigSection, LookaheadKey).toDouble(&ok);
+	if (ok) { m_lookaheadSeconds = std::clamp(lookahead, MinLookahead, MaxLookahead); }
+
 	restoreMidiInputs();
 	m_layouts.reload();
-	selectLayout(ConfigManager::inst()->value(ConfigSection, LayoutKey, DefaultLayoutId));
+	// A fresh install fits the keyboard to the clip; afterwards the user's choice is kept
+	applyLayout(ConfigManager::inst()->value(ConfigSection, LayoutKey, AutoLayoutId), false);
+
+	auto* song = Engine::getSong();
+	connect(song, &Song::projectLoaded, this, [this] { selectClip(nullptr); });
+	connect(song, &Song::playbackPositionJumped, this, &KeyFall::transportJumped);
+	connect(song, &Song::playbackStateChanged, this, &KeyFall::transportJumped);
 }
 
 void KeyFall::setTolerance(Tolerance tolerance)
@@ -179,14 +200,26 @@ void KeyFall::reloadLayouts()
 {
 	m_layouts.reload();
 	emit layoutsReloaded();
-	selectLayout(m_currentLayoutId);
+	applyLayout(m_currentLayoutId, false);
 }
 
 void KeyFall::selectLayout(const QString& id)
 {
-	const auto* entry = m_layouts.find(id);
-	if (!entry) { entry = m_layouts.find(DefaultLayoutId); }
-	if (entry)
+	applyLayout(id, true);
+}
+
+void KeyFall::applyLayout(const QString& id, bool persist)
+{
+	const auto* entry = id == AutoLayoutId ? nullptr : m_layouts.find(id);
+	if (id == AutoLayoutId)
+	{
+		const auto [lo, hi] = m_chart->keyRange();
+		const auto [first, last] = kf::autoKeyRange(lo, hi);
+		m_currentLayoutId = AutoLayoutId;
+		m_currentLayout = std::make_shared<const kf::layout::KeyboardLayout>(
+			kf::layout::KeyboardLayout::piano(first, last, "auto", "Auto"));
+	}
+	else if (entry || (entry = m_layouts.find(DefaultLayoutId)))
 	{
 		m_currentLayoutId = entry->id;
 		m_currentLayout = entry->layout;
@@ -198,8 +231,106 @@ void KeyFall::selectLayout(const QString& id)
 		m_currentLayout = std::make_shared<const kf::layout::KeyboardLayout>(
 			kf::layout::KeyboardLayout::piano(36, 96, DefaultLayoutId.toStdString(), "61 keys"));
 	}
-	if (m_layouts.find(id)) { ConfigManager::inst()->setValue(ConfigSection, LayoutKey, m_currentLayoutId); }
+	if (persist && m_currentLayoutId == id) { ConfigManager::inst()->setValue(ConfigSection, LayoutKey, id); }
 	emit layoutChanged();
+}
+
+QVector<ClipChoice> KeyFall::listClips() const
+{
+	QVector<ClipChoice> result;
+	const int ticksPerBar = std::max(1, Engine::getSong()->ticksPerBar());
+	for (Track* track : Engine::getSong()->tracks())
+	{
+		if (track->type() != Track::Type::Instrument) { continue; }
+		for (Clip* clip : track->getClips())
+		{
+			auto* midiClip = dynamic_cast<MidiClip*>(clip);
+			if (!midiClip) { continue; }
+			const int firstBar = midiClip->startPosition().getTicks() / ticksPerBar + 1;
+			const int lastBar = (midiClip->startPosition().getTicks() + std::max(1, midiClip->length().getTicks() - 1))
+				/ ticksPerBar + 1;
+			QString label = track->name();
+			if (!midiClip->name().isEmpty() && midiClip->name() != track->name()) { label += " › " + midiClip->name(); }
+			label += firstBar == lastBar ? tr("  (bar %1)").arg(firstBar) : tr("  (bars %1–%2)").arg(firstBar).arg(lastBar);
+			if (midiClip->notes().empty()) { label += tr(", empty"); }
+			result.push_back({midiClip, label});
+		}
+	}
+	return result;
+}
+
+void KeyFall::selectClip(MidiClip* clip)
+{
+	for (const auto& c : m_clipConnections) { disconnect(c); }
+	m_clipConnections.clear();
+	m_clip = clip;
+	if (clip)
+	{
+		// Note edits, resizing and moving the clip all change what has to fall
+		m_clipConnections << connect(clip, &Model::dataChanged, this, &KeyFall::rebuildChart)
+			<< connect(clip, &Clip::lengthChanged, this, &KeyFall::rebuildChart)
+			<< connect(clip, &Clip::positionChanged, this, &KeyFall::rebuildChart)
+			<< connect(clip, &QObject::destroyed, this, [this] { selectClip(nullptr); });
+	}
+	rebuildChart();
+}
+
+void KeyFall::rebuildChart()
+{
+	std::vector<kf::RawNote> raw;
+	double length = 0, offset = 0;
+	if (m_clip)
+	{
+		length = m_clip->length().getTicks();
+		offset = m_clip->startTimeOffset().getTicks();
+		raw.reserve(m_clip->notes().size());
+		for (const Note* n : m_clip->notes())
+		{
+			raw.push_back({static_cast<double>(n->pos().getTicks()), static_cast<double>(n->length().getTicks()),
+				n->key(), n->midiVelocity(DefaultVolume)});
+		}
+	}
+	m_chart = std::make_shared<const kf::Chart>(kf::Chart::build(raw, length, offset, &m_chartStats));
+	if (m_currentLayoutId == AutoLayoutId) { applyLayout(AutoLayoutId, false); }
+	emit chartChanged();
+}
+
+TransportSample KeyFall::sampleTransport() const
+{
+	TransportSample s;
+	const Song* song = Engine::getSong();
+	const float framesPerTick = std::max(1e-3f, Engine::framesPerTick());
+	s.ticksPerSecond = Engine::audioEngine()->outputSampleRate() / framesPerTick;
+	s.latencyTicks = Engine::audioEngine()->framesPerPeriod() / framesPerTick;
+	s.ticksPerBar = std::max(1, song->ticksPerBar());
+	s.beatsPerBar = std::max(1, const_cast<Song*>(song)->getTimeSigModel().getNumerator());
+
+	const auto mode = song->playMode();
+	const double clipStart = m_clip ? m_clip->startPosition().getTicks() : 0;
+	const double clipOffset = m_clip ? m_clip->startTimeOffset().getTicks() : 0;
+	s.songTickOfChartZero = clipStart;
+
+	if (mode == Song::PlayMode::MidiClip)
+	{
+		// Piano Roll playback: the timeline is in the clip's note coordinates
+		const auto& tl = song->getTimeline(Song::PlayMode::MidiClip);
+		s.chartTick = tl.ticks() + tl.frameOffset() / framesPerTick + clipOffset;
+		s.playing = song->isPlaying();
+	}
+	else
+	{
+		const auto& tl = song->getTimeline(Song::PlayMode::Song);
+		s.chartTick = tl.ticks() + tl.frameOffset() / framesPerTick - clipStart;
+		s.playing = song->isPlaying() && mode == Song::PlayMode::Song;
+		s.supportedMode = !(song->isPlaying() && mode == Song::PlayMode::Pattern);
+	}
+	return s;
+}
+
+void KeyFall::setLookaheadSeconds(double seconds)
+{
+	m_lookaheadSeconds = std::clamp(seconds, MinLookahead, MaxLookahead);
+	ConfigManager::inst()->setValue(ConfigSection, LookaheadKey, QString::number(m_lookaheadSeconds, 'f', 2));
 }
 
 } // namespace lmms
