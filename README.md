@@ -2,6 +2,8 @@
 
 A Tool plugin for LMMS: a trainer for playing on a MIDI keyboard. It shows falling notes from the chosen MIDI clip in sync with playback, highlights the keys you press, and scores how accurately you hit the notes. The plan and the decisions behind it are in [PLAN.md](PLAN.md).
 
+The full build guide from scratch, for Windows and Linux, along with solutions to common problems, is in [docs/BUILD.md](docs/BUILD.md).
+
 ## Environment (Windows)
 
 | What | Where |
