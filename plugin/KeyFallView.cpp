@@ -77,8 +77,8 @@ KeyFallView::KeyFallView(KeyFall* plugin)
 	setMinimumSize(MinWidth, MinHeight);
 	updateKeyboardHeight();
 
-	connect(m_plugin, &KeyFall::layoutChanged, this, &KeyFallView::onLayoutChanged);
-	connect(m_plugin, &KeyFall::layoutsReloaded, this, &KeyFallView::populateLayoutCombo);
+	// Model -> view connections live in modelChanged(): Plugin::createView() calls setModel()
+	// after construction, and ModelView::setModel() disconnects the model from this widget.
 	connect(&m_inputTimer, &QTimer::timeout, this, &KeyFallView::pollInput);
 	m_inputTimer.setTimerType(Qt::PreciseTimer);
 	m_inputTimer.setInterval(InputPollIntervalMs);
@@ -177,6 +177,13 @@ QMenu* KeyFallView::createSettingsMenu()
 	});
 	menu->addAction(tr("Reload layouts"), this, [this] { m_plugin->reloadLayouts(); });
 	return menu;
+}
+
+void KeyFallView::modelChanged()
+{
+	ToolPluginView::modelChanged();
+	connect(m_plugin, &KeyFall::layoutChanged, this, &KeyFallView::onLayoutChanged, Qt::UniqueConnection);
+	connect(m_plugin, &KeyFall::layoutsReloaded, this, &KeyFallView::populateLayoutCombo, Qt::UniqueConnection);
 }
 
 void KeyFallView::populateLayoutCombo()

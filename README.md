@@ -27,7 +27,7 @@ KeyFall draws your keyboard (or pads) from a `*.kflayout.json` file. To add your
 ## Testing without a MIDI keyboard
 
 1. Create a port named `lmms` in [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html).
-2. Start LMMS with `scripts\lmms.cmd run`. The `lmms` port gets connected to the instrument track automatically.
+2. Start LMMS with `scripts\lmms.cmd run`. For the instrument track to sound, click once in its instrument window: LMMS auto-assigns the `lmms` port when the instrument gets focus. Alternatively, use the track's ⚙ → MIDI → Input menu.
 3. Play into it:
 
 ```bat

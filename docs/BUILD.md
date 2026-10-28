@@ -187,4 +187,5 @@ To test without a keyboard: `pip install mido python-rtmidi`, then `python scrip
 | `unresolved external symbol ... MidiPort::MidiPort` when linking `keyfall.dll` | Patch `0002` (`LMMS_EXPORT`) was not applied, or LMMS was not rebuilt after it |
 | `add_subdirectory given source "KeyFall" which is not an existing directory` | The `lmms\plugins\KeyFall` junction is missing. Run `scripts\lmms.cmd configure`, which creates it |
 | KeyFall is missing from the Tools menu | `keyfall.dll` is not in `build\plugins`: check that `KeyFall` is in `PLUGIN_LIST` |
+| KeyFall highlights the keys, but the track is silent after LMMS starts | This is how LMMS behaves, not KeyFall: auto-assign (`midiautoassign`) connects the port when the track is created, but loading the project template then turns its MIDI input off. Auto-assign happens again when the instrument's keyboard gets focus. Click once in the track's instrument window (or in Piano Roll), or tick the port in the track's ⚙ → MIDI → Input |
 | Notes arrive (the keys light up) but there is no sound | Edit → Settings → Audio: check the device. Click a key on the instrument's keyboard with the mouse to test |
