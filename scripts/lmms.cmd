@@ -19,8 +19,16 @@ set "PATH=%VS_DIR%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;%VS_DI
 if /i "%1"=="configure" goto configure
 if /i "%1"=="build"     goto build
 if /i "%1"=="run"       goto run
-echo Usage: %~nx0 configure ^| build ^| run
+if /i "%1"=="test"      goto test
+echo Usage: %~nx0 configure ^| build ^| run ^| test
 exit /b 1
+
+:test
+rem Qt-free KeyFall core: unit tests, layout corpus and built-in layouts (no LMMS needed)
+cmake -S "%~dp0..\tests" -B "%~dp0..\build-tests" -G Ninja -DCMAKE_BUILD_TYPE=Debug || exit /b 1
+cmake --build "%~dp0..\build-tests" || exit /b 1
+ctest --test-dir "%~dp0..\build-tests" --output-on-failure
+exit /b %ERRORLEVEL%
 
 :configure
 rem The plugin source lives in key-fall\plugin; LMMS sees it as plugins\KeyFall through a junction.

@@ -1,0 +1,16 @@
+{
+  "format": 2,
+  "id": "t-fourths",
+  "name": "Rows in fourths (Linnstrument-like)",
+  "zones": [
+    {
+      "type": "grid",
+      "rows": 8,
+      "cols": 16,
+      "startNote": 30,
+      "colStep": 1,
+      "rowStep": 5,
+      "shape": "rect"
+    }
+  ]
+}

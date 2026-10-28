@@ -17,7 +17,12 @@ The full build guide from scratch, for Windows and Linux, along with solutions t
 scripts\lmms.cmd configure   :: the first run builds the vcpkg dependencies (20-60 min)
 scripts\lmms.cmd build
 scripts\lmms.cmd run         :: uses its own config, dev\lmmsrc-dev.xml
+scripts\lmms.cmd test        :: core tests and layout checks (no LMMS needed)
 ```
+
+## Instrument layouts
+
+KeyFall draws your keyboard (or pads) from a `*.kflayout.json` file. To add your own, see [docs/KEYBOARD_LAYOUTS.md](docs/KEYBOARD_LAYOUTS.md).
 
 ## Testing without a MIDI keyboard
 

@@ -1,0 +1,19 @@
+{
+  "format": 2,
+  "id": "x",
+  "name": "X",
+  "zones": [
+    {
+      "id": "a",
+      "type": "piano",
+      "firstNote": 36,
+      "lastNote": 47
+    },
+    {
+      "id": "a",
+      "type": "piano",
+      "firstNote": 48,
+      "lastNote": 59
+    }
+  ]
+}

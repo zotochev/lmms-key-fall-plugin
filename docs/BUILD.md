@@ -96,6 +96,7 @@ scripts\lmms.cmd run
 | `configure` | CMake + `vcpkg install` from the LMMS manifest (fftw, fluidsynth, sndfile, SDL2, lilv, …) | first run takes **20–60 min**, later runs take seconds |
 | `build` | Ninja build into `lmms\build` | first build ~10–20 min, incremental builds are fast |
 | `run` | starts `lmms\build\lmms.exe` with the vcpkg DLLs on PATH and the separate config `dev\lmmsrc-dev.xml` | — |
+| `test` | KeyFall core tests without LMMS and Qt: unit tests, the layout test set through both checkers (C++ `kflayout-lint` and Python), and checks of the built-in layouts. Builds into `key-fall\build-tests` | ~1 min the first time |
 
 Default paths can be overridden with environment variables:
 

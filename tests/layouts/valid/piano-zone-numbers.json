@@ -1,0 +1,16 @@
+{
+  "format": 2,
+  "id": "t-piano-zone",
+  "name": "Piano zone",
+  "zones": [
+    {
+      "id": "keys",
+      "type": "piano",
+      "firstNote": 48,
+      "lastNote": 72,
+      "input": {
+        "channel": "any"
+      }
+    }
+  ]
+}

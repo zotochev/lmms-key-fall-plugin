@@ -4,3 +4,4 @@ __pycache__/
 dev/lmmsrc-dev.xml
 # JetBrains IDE settings
 .idea/
+build-tests/

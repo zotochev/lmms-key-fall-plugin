@@ -1,0 +1,16 @@
+{
+  "format": 2,
+  "id": "t-grid",
+  "name": "8x8",
+  "zones": [
+    {
+      "type": "grid",
+      "rows": 8,
+      "cols": 8,
+      "startNote": 11,
+      "colStep": 1,
+      "rowStep": 10,
+      "shape": "roundRect"
+    }
+  ]
+}

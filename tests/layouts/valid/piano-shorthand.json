@@ -1,0 +1,9 @@
+{
+  "format": 2,
+  "id": "t-piano",
+  "name": "Piano",
+  "piano": [
+    "C2",
+    "C6"
+  ]
+}

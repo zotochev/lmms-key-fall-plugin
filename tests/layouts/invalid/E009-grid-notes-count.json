@@ -1,0 +1,17 @@
+{
+  "format": 2,
+  "id": "x",
+  "name": "X",
+  "zones": [
+    {
+      "type": "grid",
+      "rows": 2,
+      "cols": 2,
+      "notes": [
+        1,
+        2,
+        3
+      ]
+    }
+  ]
+}

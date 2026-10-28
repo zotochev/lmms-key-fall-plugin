@@ -26,11 +26,16 @@
 #define LMMS_KEYFALL_H
 
 #include <QStringList>
+#include <memory>
+#include <mutex>
+#include <vector>
 
 #include "KeyFallView.h"
+#include "LayoutRepository.h"
 #include "MidiEventProcessor.h"
 #include "MidiPort.h"
 #include "ToolPlugin.h"
+#include "core/InputResolver.h"
 
 namespace lmms {
 
@@ -64,16 +69,50 @@ public:
 
 	gui::PluginView* instantiateView(QWidget*) override { return new gui::KeyFallView(this); }
 
+	// --- MIDI input -------------------------------------------------------
+
+	MidiPort* midiPort() { return &m_midiPort; }
 	//! Names of MIDI inputs offered by the current MIDI backend
 	QStringList availableMidiInputs() const;
+	//! Inputs KeyFall currently listens to
+	QStringList subscribedMidiInputs() const;
+	//! Stores the current subscriptions so they are restored on the next start
+	void saveMidiInputs();
 
-	// Events arrive on the MIDI driver thread; handled from stage 3 on.
-	void processInEvent(const MidiEvent&, const TimePos& = TimePos(), f_cnt_t = 0) override {}
+	//! Moves all MIDI events received since the last call into out (GUI thread)
+	void drainInput(std::vector<kf::MidiInputEvent>& out);
+
+	// Called on the MIDI driver thread
+	void processInEvent(const MidiEvent& event, const TimePos& = TimePos(), f_cnt_t = 0) override;
 	void processOutEvent(const MidiEvent&, const TimePos& = TimePos(), f_cnt_t = 0) override {}
 
+	// --- Instrument layouts -----------------------------------------------
+
+	const LayoutRepository& layouts() const { return m_layouts; }
+	void reloadLayouts();
+	QString currentLayoutId() const { return m_currentLayoutId; }
+	std::shared_ptr<const kf::layout::KeyboardLayout> currentLayout() const { return m_currentLayout; }
+	//! Selects and persists a layout; unknown ids fall back to the default keyboard
+	void selectLayout(const QString& id);
+
+signals:
+	void layoutChanged();
+	void layoutsReloaded();
+
 private:
+	void restoreMidiInputs();
+
 	MidiPort m_midiPort;
 	Tolerance m_tolerance = Tolerance::Normal;
+
+	//! Several MIDI backends call back on different threads, so this is a
+	//! multi-producer queue; a short mutex is fine because it is never the audio thread.
+	std::mutex m_inputMutex;
+	std::vector<kf::MidiInputEvent> m_inputQueue;
+
+	LayoutRepository m_layouts;
+	QString m_currentLayoutId;
+	std::shared_ptr<const kf::layout::KeyboardLayout> m_currentLayout;
 };
 
 } // namespace lmms

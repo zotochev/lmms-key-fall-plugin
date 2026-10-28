@@ -1,0 +1,12 @@
+{
+  "$schema": "../../docs/keyboard-layout-2.schema.json",
+  "format": 2,
+  "id": "generic-88",
+  "name": "Generic 88-key keyboard (A0–C8)",
+  "author": "KeyFall",
+  "license": "CC0-1.0",
+  "piano": [
+    "A0",
+    "C8"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "format": 2,
+  "id": "x",
+  "name": "X",
+  "zones": [
+    {
+      "type": "grid",
+      "rows": 32,
+      "cols": 32,
+      "startNote": 0,
+      "colStep": 0,
+      "rowStep": 0
+    },
+    {
+      "type": "grid",
+      "rows": 1,
+      "cols": 1,
+      "notes": [
+        1
+      ]
+    }
+  ]
+}

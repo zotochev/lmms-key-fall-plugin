@@ -25,11 +25,16 @@
 #ifndef LMMS_GUI_KEYFALL_VIEW_H
 #define LMMS_GUI_KEYFALL_VIEW_H
 
+#include <QTimer>
+#include <vector>
+
 #include "ToolPluginView.h"
+#include "core/InputResolver.h"
 
 class QComboBox;
 class QLabel;
 class QMenu;
+class QToolButton;
 class QWidget;
 
 namespace lmms {
@@ -38,8 +43,11 @@ class KeyFall;
 
 namespace lmms::gui {
 
+class KeyboardWidget;
+class MidiPortMenu;
+
 //! Main window: toolbar on top, falling-notes area in the middle and the
-//! keyboard at the bottom. In this stage both areas are placeholders.
+//! instrument (keyboard, pads, ...) at the bottom.
 class KeyFallView : public ToolPluginView
 {
 	Q_OBJECT
@@ -53,17 +61,32 @@ public:
 
 protected:
 	void resizeEvent(QResizeEvent* event) override;
+	void showEvent(QShowEvent* event) override;
+	void hideEvent(QHideEvent* event) override;
 
 private:
 	QWidget* createToolbar();
 	QMenu* createSettingsMenu();
 	void updateKeyboardHeight();
 
+	void populateLayoutCombo();
+	void onLayoutChanged();
+	void updateMidiInState();
+	void pollInput();
+	void showLastEvent(const kf::MidiInputEvent& event, bool insideLayout);
+
 	KeyFall* m_plugin;
 	QComboBox* m_clipCombo;
-	QLabel* m_midiInLabel;
-	QWidget* m_fallArea;
-	QWidget* m_keyboardArea;
+	QComboBox* m_layoutCombo;
+	QToolButton* m_midiInButton;
+	MidiPortMenu* m_midiInMenu;
+	QLabel* m_lastEventLabel;
+	QLabel* m_fallArea;
+	KeyboardWidget* m_keyboard;
+
+	QTimer m_inputTimer;
+	kf::InputResolver m_resolver;
+	std::vector<kf::MidiInputEvent> m_inputBuffer;
 };
 
 } // namespace lmms::gui

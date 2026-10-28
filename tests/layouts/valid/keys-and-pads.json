@@ -1,0 +1,44 @@
+{
+  "format": 2,
+  "id": "t-keys-pads",
+  "name": "Keys + pads",
+  "match": {
+    "midiPort": "Launchkey"
+  },
+  "zones": [
+    {
+      "id": "keys",
+      "type": "piano",
+      "firstNote": "C2",
+      "lastNote": "C6",
+      "hand": "right"
+    },
+    {
+      "id": "pads",
+      "type": "grid",
+      "rows": 2,
+      "cols": 8,
+      "input": {
+        "channel": 10
+      },
+      "notes": [
+        40,
+        41,
+        42,
+        43,
+        48,
+        49,
+        50,
+        51,
+        36,
+        37,
+        38,
+        39,
+        44,
+        45,
+        46,
+        47
+      ]
+    }
+  ]
+}

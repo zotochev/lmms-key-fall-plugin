@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "id": "t-v1",
+  "name": "Old format",
+  "octaveShift": {
+    "min": -3,
+    "max": 3
+  },
+  "zones": [
+    {
+      "type": "piano",
+      "firstNote": 36,
+      "lastNote": 84,
+      "channel": "any"
+    }
+  ]
+}

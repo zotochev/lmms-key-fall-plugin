@@ -1,0 +1,12 @@
+{
+  "$schema": "../../docs/keyboard-layout-2.schema.json",
+  "format": 2,
+  "id": "generic-25",
+  "name": "Generic 25-key keyboard (C3–C5)",
+  "author": "KeyFall",
+  "license": "CC0-1.0",
+  "piano": [
+    "C3",
+    "C5"
+  ]
+}

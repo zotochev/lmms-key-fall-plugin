@@ -1,0 +1,15 @@
+{
+  "format": 2,
+  "id": "x",
+  "name": "X",
+  "zones": [
+    {
+      "type": "piano",
+      "firstNote": 60,
+      "lastNote": 72,
+      "input": {
+        "channel": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "../../docs/keyboard-layout-2.schema.json",
+  "format": 2,
+  "id": "generic-76",
+  "name": "Generic 76-key keyboard (E1–G7)",
+  "author": "KeyFall",
+  "license": "CC0-1.0",
+  "piano": [
+    "E1",
+    "G7"
+  ]
+}
