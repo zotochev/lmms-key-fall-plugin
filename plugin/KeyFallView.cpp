@@ -106,6 +106,7 @@ KeyFallView::KeyFallView(KeyFall* plugin)
 	mainLayout->setContentsMargins(0, 0, 0, 0);
 	mainLayout->setSpacing(0);
 	mainLayout->addWidget(createToolbar());
+	mainLayout->addWidget(createStatusBar());
 	mainLayout->addWidget(m_fall, 1);
 	mainLayout->addWidget(m_keyboard);
 
@@ -140,14 +141,17 @@ QWidget* KeyFallView::createToolbar()
 	layout->setContentsMargins(6, 4, 6, 4);
 
 	m_clipCombo->setToolTip(tr("Instrument-track clip to practise"));
-	m_clipCombo->setMinimumContentsLength(18);
+	m_clipCombo->setMinimumContentsLength(24);
+	m_clipCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
 	static_cast<ClipCombo*>(m_clipCombo)->beforePopup = [this] { populateClipCombo(); };
 	connect(m_clipCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
 		m_plugin->selectClip(index > 0 && index < m_clipItems.size() ? m_clipItems[index].data() : nullptr);
 	});
 
 	m_layoutCombo->setToolTip(tr("Your instrument: keyboard size, pads, ..."));
-	m_layoutCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+	// Long layout names must not squeeze the clip list: the popup still shows them in full
+	m_layoutCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+	m_layoutCombo->setMinimumContentsLength(16);
 	connect(m_layoutCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
 		m_plugin->selectLayout(m_layoutCombo->itemData(index).toString());
 	});
@@ -161,12 +165,6 @@ QWidget* KeyFallView::createToolbar()
 	m_midiInButton->setPopupMode(QToolButton::InstantPopup);
 	m_midiInButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
 
-	m_lastEventLabel->setMinimumWidth(m_lastEventLabel->fontMetrics().horizontalAdvance(QStringLiteral("CC 127 = 127  ch 16")));
-	m_lastEventLabel->setToolTip(tr("Last MIDI message received: useful when writing your own layout file"));
-
-	m_hudLabel->setToolTip(tr("Accuracy so far · streak · average timing of the last hits"));
-	m_hudLabel->setStyleSheet(QStringLiteral("QLabel { font-weight: bold; }"));
-
 	auto settingsButton = new QToolButton();
 	settingsButton->setText(QStringLiteral("⚙"));
 	settingsButton->setToolTip(tr("Settings"));
@@ -178,12 +176,29 @@ QWidget* KeyFallView::createToolbar()
 	layout->addSpacing(8);
 	layout->addWidget(m_layoutCombo);
 	layout->addWidget(m_midiInButton);
-	layout->addSpacing(8);
-	layout->addWidget(m_hudLabel);
-	layout->addSpacing(8);
-	layout->addWidget(m_lastEventLabel);
 	layout->addWidget(settingsButton);
 	return toolbar;
+}
+
+QWidget* KeyFallView::createStatusBar()
+{
+	// A line of its own with a fixed height: the live score appearing or disappearing
+	// must not resize the toolbar controls above it
+	auto bar = new QWidget();
+	auto layout = new QHBoxLayout(bar);
+	layout->setContentsMargins(8, 0, 8, 3);
+
+	m_hudLabel->setToolTip(tr("Accuracy so far · streak · average timing of the last hits"));
+	m_hudLabel->setStyleSheet(QStringLiteral("QLabel { font-weight: bold; }"));
+	m_lastEventLabel->setToolTip(tr("Last MIDI message received: useful when writing your own layout file"));
+	m_lastEventLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+	m_lastEventLabel->setStyleSheet(QStringLiteral("QLabel { color: #8a8f98; }"));
+
+	layout->addWidget(m_hudLabel);
+	layout->addStretch(1);
+	layout->addWidget(m_lastEventLabel);
+	bar->setFixedHeight(bar->fontMetrics().height() + 6);
+	return bar;
 }
 
 QMenu* KeyFallView::createSettingsMenu()

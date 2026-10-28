@@ -75,6 +75,7 @@ protected:
 
 private:
 	QWidget* createToolbar();
+	QWidget* createStatusBar();
 	QMenu* createSettingsMenu();
 	void updateKeyboardHeight();
 
