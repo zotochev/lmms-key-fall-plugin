@@ -2,3 +2,5 @@
 __pycache__/
 # Runtime LMMS config, created from dev/lmmsrc-dev.template.xml by scripts/lmms.cmd
 dev/lmmsrc-dev.xml
+# JetBrains IDE settings
+.idea/

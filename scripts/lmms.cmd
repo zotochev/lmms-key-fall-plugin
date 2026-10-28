@@ -23,6 +23,8 @@ echo Usage: %~nx0 configure ^| build ^| run
 exit /b 1
 
 :configure
+rem The plugin source lives in key-fall\plugin; LMMS sees it as plugins\KeyFall through a junction.
+if not exist "%LMMS_SRC%\plugins\KeyFall" mklink /J "%LMMS_SRC%\plugins\KeyFall" "%~dp0..\plugin" || exit /b 1
 rem Minimal plug-in set keeps rebuilds fast; drop LMMS_MINIMAL/PLUGIN_LIST for a full build.
 cmake -S "%LMMS_SRC%" -B "%LMMS_BUILD%" -G Ninja ^
   --toolchain "%KEYFALL_VCPKG%\scripts\buildsystems\vcpkg.cmake" ^
@@ -32,7 +34,7 @@ cmake -S "%LMMS_SRC%" -B "%LMMS_BUILD%" -G Ninja ^
   -DVCPKG_TARGET_TRIPLET=x64-windows ^
   -DVCPKG_HOST_TRIPLET=x64-windows ^
   -DLMMS_MINIMAL=ON ^
-  -DPLUGIN_LIST="TapTempo MidiImport"
+  -DPLUGIN_LIST="KeyFall TapTempo MidiImport"
 exit /b %ERRORLEVEL%
 
 :build

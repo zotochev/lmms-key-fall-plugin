@@ -1,0 +1,68 @@
+diff --git a/cmake/modules/PluginList.cmake b/cmake/modules/PluginList.cmake
+index 7d0afb555..c07bb408e 100644
+--- a/cmake/modules/PluginList.cmake
++++ b/cmake/modules/PluginList.cmake
+@@ -41,6 +41,7 @@ SET(LMMS_PLUGIN_LIST
+ 	FrequencyShifter
+ 	GranularPitchShifter
+ 	HydrogenImport
++	KeyFall
+ 	LadspaBrowser
+ 	LadspaEffect
+ 	LOMM
+diff --git a/include/MidiClient.h b/include/MidiClient.h
+index 1eb04402b..fbd85cc12 100644
+--- a/include/MidiClient.h
++++ b/include/MidiClient.h
+@@ -30,6 +30,7 @@
+ 
+ 
+ #include "MidiEvent.h"
++#include "lmms_export.h"
+ 
+ class QObject;
+ 
+@@ -42,7 +43,7 @@ class TimePos;
+ 
+ 
+ // base-class for all MIDI-clients
+-class MidiClient
++class LMMS_EXPORT MidiClient
+ {
+ public:
+ 	MidiClient() = default;
+@@ -121,7 +122,7 @@ protected:
+ const uint32_t RAW_MIDI_PARSE_BUF_SIZE = 16;
+ 
+ 
+-class MidiClientRaw : public MidiClient
++class LMMS_EXPORT MidiClientRaw : public MidiClient
+ {
+ public:
+ 	MidiClientRaw() = default;
+diff --git a/include/MidiPort.h b/include/MidiPort.h
+index 6078f7a9b..eec4041fc 100644
+--- a/include/MidiPort.h
++++ b/include/MidiPort.h
+@@ -52,7 +52,7 @@ class InstrumentMidiIOView;
+ 
+ 
+ // class for abstraction of MIDI-port
+-class MidiPort : public Model, public SerializingObject
++class LMMS_EXPORT MidiPort : public Model, public SerializingObject
+ {
+ 	Q_OBJECT
+ 	mapPropertyFromModel(int,inputChannel,setInputChannel,m_inputChannelModel);
+diff --git a/include/MidiPortMenu.h b/include/MidiPortMenu.h
+index 59604969b..975927bcb 100644
+--- a/include/MidiPortMenu.h
++++ b/include/MidiPortMenu.h
+@@ -36,7 +36,7 @@ class QAction;
+ namespace lmms::gui
+ {
+ 
+-class MidiPortMenu : public QMenu, public ModelView
++class LMMS_EXPORT MidiPortMenu : public QMenu, public ModelView
+ {
+ 	Q_OBJECT
+ public:

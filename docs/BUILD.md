@@ -62,13 +62,23 @@ git checkout -b keyfall bed447baab187ea6292449048e0b1aab16082e3b
 git submodule update --init --recursive
 ```
 
-**VS 2022 only.** LMMS master requires MSVC 19.51 (VS 2026). The source code doesn't need it; the restriction is a version check in CMake. Apply the patch:
+Apply the KeyFall patches:
 
 ```bat
+git apply ..\key-fall\patches\lmms-0002-keyfall-plugin-and-midi-exports.patch
 git apply ..\key-fall\patches\lmms-0001-allow-msvc-2022.patch
 ```
 
-If you have VS 2026, skip the patch.
+| Patch | Why |
+|---|---|
+| `0002-keyfall-plugin-and-midi-exports` | Adds `KeyFall` to `LMMS_PLUGIN_LIST` and marks `MidiPort`, `MidiClient` and `MidiPortMenu` with `LMMS_EXPORT`. Without the export, the plugin won't link, because symbols in LMMS are hidden by default. **Required on every OS.** |
+| `0001-allow-msvc-2022` | **VS 2022 only.** LMMS master requires MSVC 19.51 (VS 2026). The source code doesn't need it; the restriction is a version check in CMake. Skip this patch if you have VS 2026 |
+
+The plugin code itself is not copied into LMMS. On the first run, `scripts\lmms.cmd configure` creates the junction `lmms\plugins\KeyFall → key-fall\plugin`. To keep `git status` in LMMS clean, add it to the exclusions once:
+
+```bat
+echo plugins/KeyFall>> .git\info\exclude
+```
 
 ### 5. Configure and build
 
@@ -98,7 +108,9 @@ Default paths can be overridden with environment variables:
 
 In `scripts\lmms.cmd` the Visual Studio path is set to `...\2022\Community`. For Build Tools or VS 2026, change `VS_DIR`.
 
-To keep rebuilds fast, `configure` builds only a minimal set of plugins plus `TapTempo` and `MidiImport`. For a full set, remove `-DLMMS_MINIMAL=ON` and `-DPLUGIN_LIST=...` from the script. Some plugins are not built anyway: Sid and the SWH LADSPA plugins need Perl, GIG needs libgig, SUIL needs suil. We don't need any of them.
+After building, KeyFall opens from the **Tools → KeyFall** menu.
+
+To keep rebuilds fast, `configure` builds only a minimal set of plugins plus `KeyFall`, `TapTempo` and `MidiImport`. For a full set, remove `-DLMMS_MINIMAL=ON` and `-DPLUGIN_LIST=...` from the script. Some plugins are not built anyway: Sid and the SWH LADSPA plugins need Perl, GIG needs libgig, SUIL needs suil. We don't need any of them.
 
 ### 6. Separate LMMS config
 
@@ -149,12 +161,14 @@ cd ~/Projects
 git clone https://github.com/LMMS/lmms.git && cd lmms
 git checkout -b keyfall bed447baab187ea6292449048e0b1aab16082e3b
 git submodule update --init --recursive
-cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLMMS_MINIMAL=ON -DPLUGIN_LIST="TapTempo MidiImport"
+git apply ../key-fall/patches/lmms-0002-keyfall-plugin-and-midi-exports.patch
+ln -s ../../key-fall/plugin plugins/KeyFall && echo plugins/KeyFall >> .git/info/exclude
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLMMS_MINIMAL=ON -DPLUGIN_LIST="KeyFall TapTempo MidiImport"
 cmake --build build -j"$(nproc)"
 ./build/lmms
 ```
 
-The patch for MSVC is not needed on Linux.
+On Linux you only need patch `0002`; the MSVC patch is not needed.
 To test without a keyboard: `pip install mido python-rtmidi`, then `python scripts/virtual_player.py chords`. Without `--port` the script creates its own ALSA port, `KeyFall Virtual Player`; connect it to LMMS in the track's MIDI → Input menu.
 
 ---
@@ -169,4 +183,7 @@ To test without a keyboard: `pip install mido python-rtmidi`, then `python scrip
 | After a failed `configure`, things keep failing | Delete `lmms\build` (the vcpkg packages stay in the `C:\vcpkg` cache) |
 | `lmms.exe` won't start, a DLL is missing | Start it through `scripts\lmms.cmd run`; it adds `build\vcpkg_installed\x64-windows\bin` and Qt to PATH |
 | LMMS doesn't see the loopMIDI port | The port was created after LMMS started. Restart LMMS |
+| `unresolved external symbol ... MidiPort::MidiPort` when linking `keyfall.dll` | Patch `0002` (`LMMS_EXPORT`) was not applied, or LMMS was not rebuilt after it |
+| `add_subdirectory given source "KeyFall" which is not an existing directory` | The `lmms\plugins\KeyFall` junction is missing. Run `scripts\lmms.cmd configure`, which creates it |
+| KeyFall is missing from the Tools menu | `keyfall.dll` is not in `build\plugins`: check that `KeyFall` is in `PLUGIN_LIST` |
 | Notes arrive (the keys light up) but there is no sound | Edit → Settings → Audio: check the device. Click a key on the instrument's keyboard with the mouse to test |
