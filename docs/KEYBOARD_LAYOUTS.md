@@ -135,7 +135,7 @@ Both checkers report the same codes: the plugin and `kflayout-lint` (C++), and `
 
 ## Sending your layout to the project
 
-1. The file goes in `plugin/layouts/<id>.kflayout.json`, and the `id` matches the file name.
+1. The file goes in `plugin/layouts/<id>.kflayout.json`, and the `id` matches the file name. Built-in layouts are embedded into the plugin when CMake configures, so after adding a file run `scripts\lmms.cmd configure` and only then `build`.
 2. `python scripts/validate_layouts.py --strict plugin/layouts/<id>.kflayout.json` passes with no errors or warnings.
 3. `author` is filled in, and `license` is set to `CC0-1.0` so others can freely reuse the layout.
 4. You have checked the layout on the real device: every key and pad lights up in the right place.

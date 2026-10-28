@@ -47,6 +47,24 @@ const QColor NoteFill{0x56, 0xb4, 0xe9};
 const QColor NoteSounding{0x9f, 0xd6, 0xf4};
 const QColor MessageText{0x8a, 0x8f, 0x98};
 const QColor GhostColor{0x56, 0xb4, 0xe9};
+const QColor HitColor{0x00, 0x9e, 0x73};
+const QColor MissColor{0x8a, 0x8f, 0x98};
+const QColor WorstBar{0xd5, 0x5e, 0x00};
+const QColor MiddleBar{0xf0, 0xe4, 0x42};
+const QColor CardBackground{0x16, 0x19, 0x1c, 235};
+const QColor CardText{0xe6, 0xe8, 0xeb};
+
+QColor mix(const QColor& a, const QColor& b, double t)
+{
+	return QColor::fromRgbF(a.redF() + (b.redF() - a.redF()) * t, a.greenF() + (b.greenF() - a.greenF()) * t,
+		a.blueF() + (b.blueF() - a.blueF()) * t);
+}
+
+//! Bar accuracy 0..1 -> vermillion .. yellow .. green (Okabe-Ito endpoints)
+QColor heat(double accuracy)
+{
+	return accuracy < 0.5 ? mix(WorstBar, MiddleBar, accuracy * 2) : mix(MiddleBar, HitColor, (accuracy - 0.5) * 2);
+}
 
 constexpr double MinNoteHeight = 6.0; // px, so very short notes stay visible
 constexpr double NoteGap = 3.0;       // px between a note's end and the next note on the same key
@@ -89,6 +107,12 @@ void FallCanvas::setMessage(const QString& message)
 {
 	if (message == m_message) { return; }
 	m_message = message;
+	update();
+}
+
+void FallCanvas::setSummary(std::optional<kf::ScoreSummary> summary)
+{
+	m_summary = std::move(summary);
 	update();
 }
 
@@ -187,7 +211,8 @@ void FallCanvas::paintNotes(QPainter& p, double lookaheadTicks) const
 		const QRectF r(lane.left() + 1.5, top, std::max(2.0, lane.width() - 3), bottom - top);
 
 		const bool sounding = n.start <= now && now < n.end();
-		QColor fill = sounding ? NoteSounding : NoteFill;
+		const kf::Grade grade = m_grades && i < m_grades->size() ? (*m_grades)[i] : kf::Grade::Pending;
+		QColor fill = kf::isHit(grade) ? HitColor : grade == kf::Grade::Miss ? MissColor : sounding ? NoteSounding : NoteFill;
 		fill.setAlphaF(0.55 + 0.45 * n.velocity / 127.0); // soft notes stay visible
 		const double radius = std::min(4.0, r.width() / 3);
 		p.setPen(QPen(fill.darker(160), 1));
@@ -246,6 +271,82 @@ void FallCanvas::paintStatus(QPainter& p) const
 	}
 }
 
+void FallCanvas::paintSummary(QPainter& p) const
+{
+	const auto& s = *m_summary;
+	const double w = std::min(width() - 24.0, 560.0);
+	const QRectF card((width() - w) / 2, std::max(8.0, height() / 2.0 - 95), w, 190);
+	p.setRenderHint(QPainter::Antialiasing, true);
+	p.setPen(QPen(BarLine, 1));
+	p.setBrush(CardBackground);
+	p.drawRoundedRect(card, 8, 8);
+
+	const QRectF inner = card.adjusted(16, 12, -16, -12);
+	QFont f = font();
+	f.setPixelSize(20);
+	f.setBold(true);
+	p.setFont(f);
+	p.setPen(CardText);
+	const QString stars = QString(s.stars, QChar(0x2605)) + QString(3 - s.stars, QChar(0x2606));
+	p.drawText(inner, Qt::AlignHCenter | Qt::AlignTop,
+		tr("Notes %1%   Rhythm %2%   %3").arg(qRound(s.notesPercent)).arg(qRound(s.rhythmPercent)).arg(stars));
+
+	f.setPixelSize(12);
+	f.setBold(false);
+	p.setFont(f);
+	p.setPen(MessageText);
+	QString details = tr("Hit %1 of %2 notes · best streak %3").arg(s.hits).arg(s.expected).arg(s.bestStreak);
+	if (s.extras > 0) { details += tr(" · %n extra note(s)", nullptr, s.extras); }
+	p.drawText(inner.adjusted(0, 30, 0, 0), Qt::AlignHCenter | Qt::AlignTop, details);
+
+	// Plain-language timing feedback (pedagogy review): consistent bias vs unsteady pulse
+	QString timing;
+	const int mean = qRound(std::abs(s.meanDeltaMs));
+	const int spread = qRound(s.stddevDeltaMs);
+	if (s.hits == 0 && s.extras == 0 && s.brushes == 0)
+	{
+		timing = tr("No key presses arrived. Check “MIDI in” above, or let KeyFall play: ⚙ → Auto-play (demo).");
+	}
+	else if (s.hits < 8) { timing = tr("Play a few more notes for timing feedback."); }
+	else if (mean > 25 && spread < 40)
+	{
+		timing = (s.meanDeltaMs > 0 ? tr("You play about %1 ms late on average.") : tr("You play about %1 ms early on average.")).arg(mean)
+			+ tr(" If it is the same in every song, recalibrate (⚙ → Calibrate latency).");
+	}
+	else if (spread > 60) { timing = tr("Your timing varies a lot (±%1 ms): practise slowly with the metronome.").arg(spread); }
+	else { timing = tr("Your timing is centred (±%1 ms).").arg(spread); }
+	p.drawText(inner.adjusted(0, 52, 0, 0), Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap, timing);
+
+	// Heat map: one cell per bar, the most actionable view of where to practise
+	if (!s.barAccuracy.empty())
+	{
+		const double cellsTop = inner.top() + 100;
+		const double cellW = std::min(28.0, inner.width() / s.barAccuracy.size());
+		const double left = inner.center().x() - cellW * s.barAccuracy.size() / 2;
+		f.setPixelSize(9);
+		p.setFont(f);
+		for (std::size_t b = 0; b < s.barAccuracy.size(); ++b)
+		{
+			const QRectF cell(left + b * cellW + 1, cellsTop, cellW - 2, 16);
+			const double acc = s.barAccuracy[b];
+			p.setPen(Qt::NoPen);
+			p.setBrush(acc < 0 ? BeatLine : heat(acc));
+			p.drawRoundedRect(cell, 2, 2);
+			if (cellW >= 16)
+			{
+				p.setPen(MessageText);
+				p.drawText(QRectF(cell.left(), cell.bottom() + 1, cell.width(), 12), Qt::AlignHCenter | Qt::AlignTop,
+					QString::number(s.firstBar + static_cast<int>(b)));
+			}
+		}
+	}
+
+	f.setPixelSize(11);
+	p.setFont(f);
+	p.setPen(MessageText);
+	p.drawText(inner, Qt::AlignHCenter | Qt::AlignBottom, tr("Press Play to try again"));
+}
+
 void FallCanvas::paintEvent(QPaintEvent*)
 {
 	QPainter p(this);
@@ -271,6 +372,7 @@ void FallCanvas::paintEvent(QPaintEvent*)
 	p.setRenderHint(QPainter::Antialiasing, false);
 	p.fillRect(QRectF(0, height() - 2, width(), 2), HitLine);
 	paintStatus(p);
+	if (m_summary && !m_timeline.playing) { paintSummary(p); }
 
 	// Ghosts that floated out of view are dropped here, where their age is known
 	const double pxPerSecond = height() / m_lookaheadSeconds;

@@ -1,0 +1,155 @@
+{
+  "$schema": "../../docs/keyboard-layout-2.schema.json",
+  "format": 2,
+  "id": "demo-concertina-style",
+  "name": "Demo: concertina-style buttons (2 × 16)",
+  "author": "KeyFall",
+  "license": "CC0-1.0",
+  "description": "Illustrative layout, not a real instrument: two ends of staggered round buttons, scale notes alternating between hands as on an English concertina. Shows how button instruments can be described with the current format (unisonoric only; bellows states come in a later version).",
+  "zones": [
+    {
+      "id": "L.r0",
+      "type": "grid",
+      "hand": "left",
+      "rows": 1,
+      "cols": 4,
+      "notes": [
+        "C#4",
+        "F#4",
+        "C#5",
+        "F#5"
+      ],
+      "shape": "circle",
+      "position": [
+        0.575,
+        0.0
+      ]
+    },
+    {
+      "id": "L.r1",
+      "type": "grid",
+      "hand": "left",
+      "rows": 1,
+      "cols": 4,
+      "notes": [
+        "C4",
+        "G4",
+        "D5",
+        "A5"
+      ],
+      "shape": "circle",
+      "position": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "id": "L.r2",
+      "type": "grid",
+      "hand": "left",
+      "rows": 1,
+      "cols": 4,
+      "notes": [
+        "E4",
+        "B4",
+        "F5",
+        "C6"
+      ],
+      "shape": "circle",
+      "position": [
+        0.575,
+        2.001
+      ]
+    },
+    {
+      "id": "L.r3",
+      "type": "grid",
+      "hand": "left",
+      "rows": 1,
+      "cols": 4,
+      "notes": [
+        "Bb3",
+        "Eb4",
+        "Bb4",
+        "Eb5"
+      ],
+      "shape": "circle",
+      "position": [
+        0.0,
+        3.002
+      ]
+    },
+    {
+      "id": "R.r0",
+      "type": "grid",
+      "hand": "right",
+      "rows": 1,
+      "cols": 4,
+      "notes": [
+        "D#4",
+        "G#4",
+        "D#5",
+        "G#5"
+      ],
+      "shape": "circle",
+      "position": [
+        7.075,
+        0.0
+      ]
+    },
+    {
+      "id": "R.r1",
+      "type": "grid",
+      "hand": "right",
+      "rows": 1,
+      "cols": 4,
+      "notes": [
+        "D4",
+        "A4",
+        "E5",
+        "B5"
+      ],
+      "shape": "circle",
+      "position": [
+        6.5,
+        1.0
+      ]
+    },
+    {
+      "id": "R.r2",
+      "type": "grid",
+      "hand": "right",
+      "rows": 1,
+      "cols": 4,
+      "notes": [
+        "F4",
+        "C5",
+        "G5",
+        "D6"
+      ],
+      "shape": "circle",
+      "position": [
+        7.075,
+        2.001
+      ]
+    },
+    {
+      "id": "R.r3",
+      "type": "grid",
+      "hand": "right",
+      "rows": 1,
+      "cols": 4,
+      "notes": [
+        "A#3",
+        "F4",
+        "A#4",
+        "F5"
+      ],
+      "shape": "circle",
+      "position": [
+        6.5,
+        3.002
+      ]
+    }
+  ]
+}

@@ -60,6 +60,8 @@ const auto ToleranceKey = QStringLiteral("tolerance");
 const auto MidiInputsKey = QStringLiteral("midiinputs");
 const auto LayoutKey = QStringLiteral("layout");
 const auto LookaheadKey = QStringLiteral("lookahead");
+const auto InputOffsetKey = QStringLiteral("inputoffset");
+constexpr double MaxInputOffsetMs = 300;
 // Port names go into an XML attribute, where newlines would not survive
 const QChar MidiInputSeparator = QLatin1Char(';');
 //! Fallback when a saved layout id no longer exists
@@ -105,6 +107,8 @@ KeyFall::KeyFall()
 	bool ok = false;
 	const double lookahead = ConfigManager::inst()->value(ConfigSection, LookaheadKey).toDouble(&ok);
 	if (ok) { m_lookaheadSeconds = std::clamp(lookahead, MinLookahead, MaxLookahead); }
+	const double offset = ConfigManager::inst()->value(ConfigSection, InputOffsetKey).toDouble(&ok);
+	if (ok) { m_inputOffsetMs = std::clamp(offset, -MaxInputOffsetMs, MaxInputOffsetMs); }
 
 	restoreMidiInputs();
 	m_layouts.reload();
@@ -325,6 +329,12 @@ TransportSample KeyFall::sampleTransport() const
 		s.supportedMode = !(song->isPlaying() && mode == Song::PlayMode::Pattern);
 	}
 	return s;
+}
+
+void KeyFall::setInputOffsetMs(double ms)
+{
+	m_inputOffsetMs = std::clamp(ms, -MaxInputOffsetMs, MaxInputOffsetMs);
+	ConfigManager::inst()->setValue(ConfigSection, InputOffsetKey, QString::number(m_inputOffsetMs, 'f', 1));
 }
 
 void KeyFall::setLookaheadSeconds(double seconds)

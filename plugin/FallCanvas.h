@@ -29,9 +29,11 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "core/Chart.h"
+#include "core/Scorer.h"
 
 namespace lmms::gui {
 
@@ -69,6 +71,11 @@ public:
 	//! True while something moves without the transport (ghost bars)
 	bool isAnimating(std::int64_t nowNs) const;
 
+	//! Per-note results of the current run (owned by the caller), used to colour notes
+	void setGrades(const std::vector<kf::Grade>* grades) { m_grades = grades; }
+	//! Result card shown while the song is stopped; nullopt hides it
+	void setSummary(std::optional<kf::ScoreSummary> summary);
+
 	//! Called with ctrl+wheel steps (+1 = longer look-ahead)
 	std::function<void(int)> onLookaheadStep;
 
@@ -88,6 +95,7 @@ private:
 	void paintNotes(QPainter& p, double lookaheadTicks) const;
 	void paintGhosts(QPainter& p, std::int64_t nowNs) const;
 	void paintStatus(QPainter& p) const;
+	void paintSummary(QPainter& p) const;
 	double yForTick(double tick, double lookaheadTicks) const;
 
 	KeyboardWidget* m_keyboard;
@@ -96,6 +104,8 @@ private:
 	double m_lookaheadSeconds = 3.0;
 	QString m_message;
 	std::vector<Ghost> m_ghosts;
+	const std::vector<kf::Grade>* m_grades = nullptr;
+	std::optional<kf::ScoreSummary> m_summary;
 };
 
 } // namespace lmms::gui

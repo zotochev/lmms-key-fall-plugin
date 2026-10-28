@@ -87,6 +87,10 @@ public:
 	//! Also persists the choice in the user's LMMS config
 	void setTolerance(Tolerance tolerance);
 
+	//! Input + display delay measured by calibration (ms, + = presses arrive late); persisted
+	double inputOffsetMs() const { return m_inputOffsetMs; }
+	void setInputOffsetMs(double ms);
+
 	QString nodeName() const override;
 	void saveSettings(QDomDocument&, QDomElement&) override {}
 	void loadSettings(const QDomElement&) override {}
@@ -150,6 +154,7 @@ private:
 
 	MidiPort m_midiPort;
 	Tolerance m_tolerance = Tolerance::Normal;
+	double m_inputOffsetMs = 0;
 
 	//! Several MIDI backends call back on different threads, so this is a
 	//! multi-producer queue; a short mutex is fine because it is never the audio thread.

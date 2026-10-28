@@ -31,6 +31,7 @@
 #include "Chart.h"
 #include "InputResolver.h"
 #include "PlayheadClock.h"
+#include "Scorer.h"
 #include "Json.h"
 #include "KeyboardLayout.h"
 
@@ -312,6 +313,126 @@ void testPlayheadClock()
 	CHECK(clock.update(500, 3004 * Ms, tps, true) == 500);
 }
 
+void testTimingWindows()
+{
+	using kf::TolerancePreset;
+	// 120 bpm: a beat is 500 ms -> Normal perfect = 500/24 ~ 20.8, clamped up to 35 ms
+	const auto normal = kf::timingWindows(TolerancePreset::Normal, 500);
+	CHECK(normal.perfectMs == 35 && std::abs(normal.goodMs - 500.0 / 12) < 1e-9 + 20 && normal.okMs > normal.goodMs);
+	CHECK(std::abs(normal.goodMs - 60) < 1e-9); // 41.7 clamped to 60
+	CHECK(std::abs(normal.okMs - 110) < 1e-9);  // 83.3 clamped to 110
+	// 40 bpm: a beat is 1500 ms -> Loose ok = 375, clamped down to 250
+	CHECK(kf::timingWindows(TolerancePreset::Loose, 1500).okMs == 250);
+	CHECK(kf::timingWindows(TolerancePreset::Strict, 1000).perfectMs == 1000.0 / 32);
+	CHECK(kf::timingWindows(TolerancePreset::Strict, 500).okMs < kf::timingWindows(TolerancePreset::Loose, 500).okMs);
+}
+
+// 120 bpm: 96 ticks per second, 48 ticks per beat; 1 tick = 10.4 ms
+constexpr double Tps = 96, Tpb = 48;
+double ms(double milliseconds) { return milliseconds * Tps / 1000; }
+
+std::shared_ptr<const kf::Chart> chartOf(const std::vector<kf::RawNote>& notes, double length = 768)
+{
+	return std::make_shared<const kf::Chart>(kf::Chart::build(notes, length, 0));
+}
+
+void testScorerMatching()
+{
+	using Kind = kf::PressResult::Kind;
+	// Repeated sixteenth notes (125 ms apart): both are inside the Normal ok window (110 ms)
+	kf::Scorer s;
+	s.setChart(chartOf({{0, 12, 60, 100}, {12, 12, 60, 100}}));
+	s.setTolerance(kf::TolerancePreset::Normal);
+	s.start(0, Tps, Tpb);
+	// 94 ms after the first C4 and 31 ms before the second: FIFO still takes the first one
+	const auto first = s.press(60, ms(94));
+	CHECK(first.kind == Kind::Hit && first.note == 0 && first.grade == kf::Grade::Ok);
+	const auto second = s.press(60, ms(130));
+	CHECK(second.kind == Kind::Hit && second.note == 1 && second.grade == kf::Grade::Perfect);
+
+	// Quarter notes 500 ms apart
+	kf::Scorer t;
+	t.setChart(chartOf({{0, 48, 60, 100}, {48, 48, 60, 100}}));
+	t.start(0, Tps, Tpb);
+	CHECK(t.press(60, 24).kind == Kind::Extra); // 250 ms from both notes: outside every window
+	const auto a = t.press(60, ms(31));
+	CHECK(a.kind == Kind::Hit && a.note == 0 && a.grade == kf::Grade::Perfect && std::abs(a.deltaMs - 31) < 1e-6);
+	const auto b = t.press(60, 48 - ms(50)); // 50 ms early for the second C4
+	CHECK(b.kind == Kind::Hit && b.note == 1 && b.grade == kf::Grade::Good && b.deltaMs < 0);
+	CHECK(t.press(60, 48 + ms(100)).kind == Kind::Extra && t.streak() == 0); // nothing left to hit
+}
+
+void testScorerMissesAndExtras()
+{
+	using Kind = kf::PressResult::Kind;
+	kf::Scorer s;
+	s.setChart(chartOf({{0, 48, 60, 100}, {96, 48, 64, 100}, {192, 48, 67, 100}}));
+	s.start(0, Tps, Tpb);
+	CHECK(s.press(60, ms(10)).kind == Kind::Hit);
+	CHECK(s.press(70, ms(20)).kind == Kind::Extra);             // far from any note
+	CHECK(s.press(61, ms(15)).kind == Kind::Brush);             // grazed C#4 next to C4
+	CHECK(s.advance(96 + ms(200)).size() == 1);                 // E4 never played
+	CHECK(s.grades()[1] == kf::Grade::Miss);
+	CHECK(!s.finished());
+	CHECK(s.press(67, 192 + ms(50)).grade == kf::Grade::Good);
+	CHECK(s.finished());
+
+	const auto sum = s.summary(192, 0);
+	CHECK(sum.hits == 2 && sum.misses == 1 && sum.extras == 1 && sum.brushes == 1);
+	CHECK(std::abs(sum.notesPercent - 100.0 * 2 / 3.5) < 1e-9); // hits / (expected + 0.5 extras)
+	CHECK(std::abs(sum.rhythmPercent - 90) < 1e-9);            // Perfect 1.0 and Good 0.8
+	CHECK(sum.stars == 0 || sum.stars == 1);
+	CHECK(sum.barAccuracy.size() == 2 && sum.firstBar == 1);   // notes in bars 1 and 2
+	CHECK(std::abs(sum.barAccuracy[0] - 0.5) < 1e-9 && sum.barAccuracy[1] == 1.0);
+}
+
+void testScorerChordsAndSkips()
+{
+	kf::Scorer s;
+	// C major chord at tick 96, written 10 ms apart; a note before the start point
+	s.setChart(chartOf({{0, 48, 72, 100}, {96, 96, 60, 100}, {96 + 1, 96, 64, 100}, {96, 96, 67, 100}}));
+	s.start(48, Tps, Tpb);
+	CHECK(s.grades()[0] == kf::Grade::Skipped);
+	// Rolled chord: +10, +30, +50 ms -> mean +30 ms, Perfect for rhythm
+	s.press(60, 96 + ms(10));
+	s.press(64, 96 + ms(30));
+	s.press(67, 96 + ms(50));
+	const auto sum = s.summary(192, 0);
+	CHECK(sum.hits == 3 && sum.skipped == 1 && sum.misses == 0);
+	CHECK(sum.rhythmPercent == 100);        // one chord, judged by its mean onset
+	// E4 is written one tick (10.4 ms) late, so its own delta is 30 - 10.4 ms
+	CHECK(std::abs(sum.meanDeltaMs - (10 + (30 - 1000.0 / Tps) + 50) / 3) < 1e-6);
+	CHECK(sum.stars == 3);
+	// Presses are ignored when no run is active
+	kf::Scorer idle;
+	idle.setChart(chartOf({{0, 48, 60, 100}}));
+	idle.press(60, 0);
+	CHECK(idle.grades()[0] == kf::Grade::Pending);
+}
+
+void testScorerBias()
+{
+	kf::Scorer s;
+	std::vector<kf::RawNote> notes;
+	for (int i = 0; i < 16; ++i) { notes.push_back({i * 48.0, 24, 60 + (i % 2) * 4, 100}); }
+	s.setChart(chartOf(notes, 16 * 48));
+	s.start(0, Tps, Tpb);
+	for (int i = 0; i < 16; ++i) { s.press(60 + (i % 2) * 4, i * 48.0 + ms(40)); } // always 40 ms late
+	const auto sum = s.summary(192, 0);
+	CHECK(std::abs(sum.meanDeltaMs - 40) < 0.5 && sum.stddevDeltaMs < 0.5);
+	CHECK(sum.bestStreak == 16);
+}
+
+void testCalibration()
+{
+	CHECK(!kf::calibrationOffsetMs({10, 20, 30}));
+	CHECK(kf::calibrationOffsetMs({40, 42, 38, 41, 39}) == 40.0);
+	// One wild tap (missed beat) is dropped before taking the median
+	const auto withOutlier = kf::calibrationOffsetMs({35, 36, 34, 35, 36, 34, 35, 400});
+	CHECK(withOutlier && std::abs(*withOutlier - 35) < 0.6);
+	CHECK(kf::calibrationOffsetMs({-20, -22, -18, -20}) == -20.0);
+}
+
 } // namespace
 
 int main()
@@ -330,6 +451,12 @@ int main()
 		{"chart build", testChartBuild},
 		{"auto key range", testAutoKeyRange},
 		{"playhead clock", testPlayheadClock},
+		{"timing windows", testTimingWindows},
+		{"scorer matching", testScorerMatching},
+		{"scorer misses and extras", testScorerMissesAndExtras},
+		{"scorer chords and skips", testScorerChordsAndSkips},
+		{"scorer bias", testScorerBias},
+		{"calibration", testCalibration},
 	};
 	for (const auto& [name, fn] : tests)
 	{

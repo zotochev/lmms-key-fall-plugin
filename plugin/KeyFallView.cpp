@@ -38,8 +38,11 @@
 #include <QVBoxLayout>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <functional>
+#include <optional>
 
+#include "CalibrationDialog.h"
 #include "FallCanvas.h"
 #include "KeyFall.h"
 #include "KeyboardWidget.h"
@@ -50,6 +53,12 @@ namespace lmms::gui {
 namespace {
 
 constexpr int FrameIntervalMs = 16; // ~60 Hz
+
+// Auto-play (demo) performer: how human it plays
+constexpr double AutoplayJitterMs = 25;  // timing spread (standard deviation)
+constexpr double AutoplayWrongRate = 0.05;
+constexpr double AutoplayMissRate = 0.05;
+constexpr double AutoplayScheduleAheadSeconds = 0.5;
 
 std::int64_t nowNs()
 {
@@ -81,6 +90,7 @@ KeyFallView::KeyFallView(KeyFall* plugin)
 	, m_midiInButton(new QToolButton())
 	, m_midiInMenu(new MidiPortMenu(MidiPort::Mode::Input))
 	, m_lastEventLabel(new QLabel())
+	, m_hudLabel(new QLabel())
 	, m_keyboard(new KeyboardWidget())
 {
 	m_fall = new FallCanvas(m_keyboard);
@@ -90,6 +100,7 @@ KeyFallView::KeyFallView(KeyFall* plugin)
 		m_fall->setLookaheadSeconds(m_plugin->lookaheadSeconds());
 	};
 	m_fall->setToolTip(tr("Ctrl + mouse wheel: show more or less time ahead"));
+	m_fall->setGrades(&m_scorer.grades());
 
 	auto mainLayout = new QVBoxLayout(this);
 	mainLayout->setContentsMargins(0, 0, 0, 0);
@@ -153,6 +164,9 @@ QWidget* KeyFallView::createToolbar()
 	m_lastEventLabel->setMinimumWidth(m_lastEventLabel->fontMetrics().horizontalAdvance(QStringLiteral("CC 127 = 127  ch 16")));
 	m_lastEventLabel->setToolTip(tr("Last MIDI message received: useful when writing your own layout file"));
 
+	m_hudLabel->setToolTip(tr("Accuracy so far · streak · average timing of the last hits"));
+	m_hudLabel->setStyleSheet(QStringLiteral("QLabel { font-weight: bold; }"));
+
 	auto settingsButton = new QToolButton();
 	settingsButton->setText(QStringLiteral("⚙"));
 	settingsButton->setToolTip(tr("Settings"));
@@ -164,6 +178,8 @@ QWidget* KeyFallView::createToolbar()
 	layout->addSpacing(8);
 	layout->addWidget(m_layoutCombo);
 	layout->addWidget(m_midiInButton);
+	layout->addSpacing(8);
+	layout->addWidget(m_hudLabel);
 	layout->addSpacing(8);
 	layout->addWidget(m_lastEventLabel);
 	layout->addWidget(settingsButton);
@@ -198,6 +214,17 @@ QMenu* KeyFallView::createSettingsMenu()
 		connect(action, &QAction::triggered, this, [this, value] { m_plugin->setTolerance(value); });
 	}
 
+	menu->addAction(tr("Calibrate latency…"), this, &KeyFallView::openCalibration);
+	auto autoplay = menu->addAction(tr("Auto-play (demo)"));
+	autoplay->setCheckable(true);
+	autoplay->setToolTip(tr("KeyFall plays the clip itself, with small human-like mistakes"));
+	connect(autoplay, &QAction::toggled, this, [this](bool on) {
+		m_autoplay = on;
+		m_autoplayQueue.clear();
+		m_restartPending = true; // score the demo from a clean run
+	});
+	menu->setToolTipsVisible(true);
+
 	menu->addSeparator();
 	menu->addAction(tr("Open layouts folder"), this, [] {
 		const QString dir = LayoutRepository::userDirectory();
@@ -214,7 +241,10 @@ void KeyFallView::modelChanged()
 	connect(m_plugin, &KeyFall::layoutChanged, this, &KeyFallView::onLayoutChanged, Qt::UniqueConnection);
 	connect(m_plugin, &KeyFall::layoutsReloaded, this, &KeyFallView::populateLayoutCombo, Qt::UniqueConnection);
 	connect(m_plugin, &KeyFall::chartChanged, this, &KeyFallView::onChartChanged, Qt::UniqueConnection);
-	connect(m_plugin, &KeyFall::transportJumped, this, [this] { m_clock.reset(); });
+	connect(m_plugin, &KeyFall::transportJumped, this, [this] {
+		m_clock.reset();
+		m_restartPending = true;
+	});
 }
 
 void KeyFallView::populateLayoutCombo()
@@ -271,6 +301,13 @@ void KeyFallView::onLayoutChanged()
 
 void KeyFallView::onChartChanged()
 {
+	// A different or edited clip invalidates the current run
+	m_scorer.setChart(m_plugin->chart());
+	m_runActive = false;
+	m_waitForRestart = false;
+	m_recentDeltasMs.clear();
+	m_fall->setSummary(std::nullopt);
+	updateHud();
 	m_fall->setChart(m_plugin->chart());
 	if (!m_plugin->currentClip()) { m_clipCombo->setCurrentIndex(0); }
 	m_lastShownTick = -1e300;
@@ -332,19 +369,47 @@ void KeyFallView::updateMessage()
 
 void KeyFallView::tick()
 {
-	pollInput();
 	updateTransport();
+	pollInput();
 }
 
 void KeyFallView::pollInput()
 {
 	m_plugin->drainInput(m_inputBuffer);
+	if (m_autoplay)
+	{
+		std::sort(m_autoplayQueue.begin(), m_autoplayQueue.end(),
+			[](const AutoplayEvent& a, const AutoplayEvent& b) { return a.timeNs < b.timeNs; });
+		auto due = m_autoplayQueue.begin();
+		for (; due != m_autoplayQueue.end() && due->timeNs <= m_frameNs; ++due)
+		{
+			m_inputBuffer.push_back({due->timeNs, static_cast<std::uint8_t>(due->on ? 0x90 : 0x80), 1, due->key,
+				static_cast<std::uint8_t>(due->on ? 90 : 0)});
+		}
+		m_autoplayQueue.erase(m_autoplayQueue.begin(), due);
+	}
 	for (const auto& event : m_inputBuffer)
 	{
 		const auto press = m_resolver.resolve(event);
+		auto feedback = KeyboardWidget::Feedback::Neutral;
+		if (press && press->on && m_runActive)
+		{
+			// Where the press lands on the chart: back-date it from this frame, minus the calibrated delay
+			const double tick = m_currentTick - (m_frameNs - press->timeNs) * 1e-9 * m_ticksPerSecond
+				- m_plugin->inputOffsetMs() / 1000.0 * m_ticksPerSecond;
+			const auto result = m_scorer.press(press->pitch, tick);
+			if (result.kind == kf::PressResult::Kind::Hit && kf::isHit(result.grade))
+			{
+				feedback = KeyboardWidget::Feedback::Correct;
+				m_recentDeltasMs.push_back(result.deltaMs);
+				if (m_recentDeltasMs.size() > 8) { m_recentDeltasMs.erase(m_recentDeltasMs.begin()); }
+			}
+			else if (result.kind == kf::PressResult::Kind::Extra) { feedback = KeyboardWidget::Feedback::Wrong; }
+			updateHud();
+		}
 		if (press && press->control)
 		{
-			m_keyboard->setPressed(*press->control, press->on ? std::max<std::uint8_t>(press->velocity, 1) : 0);
+			m_keyboard->setPressed(*press->control, press->on ? std::max<std::uint8_t>(press->velocity, 1) : 0, feedback);
 			m_fall->notePress(*press->control, press->on, press->timeNs);
 		}
 		showLastEvent(event, !press || press->control.has_value());
@@ -364,6 +429,36 @@ void KeyFallView::updateTransport()
 	double tick = m_clock.update(s.chartTick, now, s.ticksPerSecond, s.playing);
 	// The song position runs about one buffer ahead of what is audible
 	if (s.playing) { tick -= s.latencyTicks; }
+
+	// A loop wrap does not always arrive as a jump signal: going back in time ends the pass too
+	if (m_runActive && tick < m_currentTick - 0.25 * s.ticksPerSecond) { m_restartPending = true; }
+	m_currentTick = tick;
+	m_ticksPerSecond = s.ticksPerSecond;
+	m_frameNs = now;
+
+	const bool scoring = s.playing && s.supportedMode && m_plugin->currentClip() && !m_plugin->chart()->empty();
+	if (!scoring)
+	{
+		if (m_runActive) { finishRun(s); }
+		m_waitForRestart = false;
+	}
+	else if (m_restartPending || (!m_runActive && !m_waitForRestart))
+	{
+		if (m_runActive) { finishRun(s); }
+		startRun(tick, s);
+	}
+	m_restartPending = false;
+	if (m_runActive)
+	{
+		if (m_autoplay) { scheduleAutoplay(tick); }
+		m_scorer.setTempo(s.ticksPerSecond, static_cast<double>(s.ticksPerBar) / s.beatsPerBar);
+		if (!m_scorer.advance(tick).empty()) { updateHud(); }
+		if (m_scorer.finished() && tick > m_plugin->chart()->length())
+		{
+			finishRun(s);
+			m_waitForRestart = true; // the song plays on past the clip: keep the result on screen
+		}
+	}
 
 	if (tick != m_lastShownTick || s.playing)
 	{
@@ -400,6 +495,87 @@ void KeyFallView::updateTransport()
 	{
 		m_fall->update(); // ghost bars move with the wall clock
 	}
+}
+
+void KeyFallView::startRun(double tick, const TransportSample& s)
+{
+	switch (m_plugin->tolerance())
+	{
+		case KeyFall::Tolerance::Loose: m_scorer.setTolerance(kf::TolerancePreset::Loose); break;
+		case KeyFall::Tolerance::Strict: m_scorer.setTolerance(kf::TolerancePreset::Strict); break;
+		default: m_scorer.setTolerance(kf::TolerancePreset::Normal); break;
+	}
+	m_scorer.start(tick, s.ticksPerSecond, static_cast<double>(s.ticksPerBar) / s.beatsPerBar);
+	m_runActive = true;
+	m_recentDeltasMs.clear();
+	m_autoplayQueue.clear();
+	const auto& notes = m_plugin->chart()->notes();
+	m_autoplayNext = static_cast<std::size_t>(std::lower_bound(notes.begin(), notes.end(), tick,
+		[](const kf::ChartNote& n, double t) { return n.start < t; }) - notes.begin());
+	m_fall->setSummary(std::nullopt);
+	updateHud();
+}
+
+void KeyFallView::finishRun(const TransportSample& s)
+{
+	m_scorer.stop();
+	m_runActive = false;
+	const auto summary = m_scorer.summary(s.ticksPerBar, s.songTickOfChartZero);
+	// A pass without a single judged note (e.g. stopped right away) leaves the last result in place
+	if (summary.expected > 0) { m_fall->setSummary(summary); }
+	updateHud();
+}
+
+void KeyFallView::updateHud()
+{
+	if (!m_runActive)
+	{
+		m_hudLabel->clear();
+		return;
+	}
+	QString text = tr("%1%").arg(qRound(m_scorer.liveAccuracy()));
+	text += tr("  ·  streak %1").arg(m_scorer.streak());
+	if (!m_recentDeltasMs.empty())
+	{
+		double mean = 0;
+		for (const double d : m_recentDeltasMs) { mean += d; }
+		mean /= m_recentDeltasMs.size();
+		const int ms = qRound(std::abs(mean));
+		text += ms < 10 ? tr("  ·  on time") : mean > 0 ? tr("  ·  %1 ms late").arg(ms) : tr("  ·  %1 ms early").arg(ms);
+	}
+	m_hudLabel->setText(text);
+}
+
+void KeyFallView::scheduleAutoplay(double tick)
+{
+	const auto& notes = m_plugin->chart()->notes();
+	const double tps = m_ticksPerSecond;
+	std::normal_distribution<double> jitter(0.0, AutoplayJitterMs);
+	std::uniform_real_distribution<double> chance(0.0, 1.0);
+	// Presses are timestamped like real ones, including the calibrated input delay
+	const double offsetNs = m_plugin->inputOffsetMs() * 1e6;
+	while (m_autoplayNext < notes.size() && notes[m_autoplayNext].start < tick + AutoplayScheduleAheadSeconds * tps)
+	{
+		const auto& n = notes[m_autoplayNext++];
+		if (chance(m_rng) < AutoplayMissRate) { continue; }
+		int key = n.key;
+		if (chance(m_rng) < AutoplayWrongRate) { key += chance(m_rng) < 0.5 ? -2 : 2; }
+		const auto onNs = m_frameNs + static_cast<std::int64_t>((n.start - tick) / tps * 1e9 + jitter(m_rng) * 1e6 + offsetNs);
+		const auto offNs = onNs + static_cast<std::int64_t>(n.length / tps * 1e9 * 0.9);
+		m_autoplayQueue.push_back({onNs, static_cast<std::uint8_t>(std::clamp(key, 0, 127)), true});
+		m_autoplayQueue.push_back({offNs, static_cast<std::uint8_t>(std::clamp(key, 0, 127)), false});
+	}
+}
+
+void KeyFallView::openCalibration()
+{
+	// The dialog reads MIDI input itself; the window's frame loop pauses meanwhile
+	m_frameTimer.stop();
+	CalibrationDialog dialog(m_plugin, this);
+	dialog.exec();
+	m_plugin->drainInput(m_inputBuffer);
+	m_keyboard->releaseAll();
+	if (isVisible()) { m_frameTimer.start(); }
 }
 
 void KeyFallView::showLastEvent(const kf::MidiInputEvent& event, bool insideLayout)

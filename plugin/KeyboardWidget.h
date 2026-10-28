@@ -46,8 +46,16 @@ public:
 	void setInstrumentLayout(std::shared_ptr<const kf::layout::KeyboardLayout> layout);
 	const kf::layout::KeyboardLayout* instrumentLayout() const { return m_layout.get(); }
 
+	//! How a press was judged; decides its colour (and a hatch for wrong notes)
+	enum class Feedback : std::uint8_t
+	{
+		Neutral, //!< no run active
+		Correct,
+		Wrong
+	};
+
 	//! Velocity 0 releases the control
-	void setPressed(std::uint16_t control, std::uint8_t velocity);
+	void setPressed(std::uint16_t control, std::uint8_t velocity, Feedback feedback = Feedback::Neutral);
 	void releaseAll();
 
 	//! Controls whose chart notes are sounding now get a yellow "play me" band
@@ -67,6 +75,7 @@ private:
 
 	std::shared_ptr<const kf::layout::KeyboardLayout> m_layout;
 	std::vector<std::uint8_t> m_pressed; //!< velocity per control, 0 = up
+	std::vector<Feedback> m_feedback;
 	std::vector<bool> m_expected;
 	QPixmap m_cache;
 	bool m_cacheValid = false;

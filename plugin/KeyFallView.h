@@ -28,11 +28,13 @@
 #include <QPointer>
 #include <QTimer>
 #include <QVector>
+#include <random>
 #include <vector>
 
 #include "ToolPluginView.h"
 #include "core/InputResolver.h"
 #include "core/PlayheadClock.h"
+#include "core/Scorer.h"
 
 class QComboBox;
 class QLabel;
@@ -43,6 +45,7 @@ class QWidget;
 namespace lmms {
 class KeyFall;
 class MidiClip;
+struct TransportSample;
 }
 
 namespace lmms::gui {
@@ -88,12 +91,21 @@ private:
 	void updateTransport();
 	void showLastEvent(const kf::MidiInputEvent& event, bool insideLayout);
 
+	// Scoring runs: one run per pass from Play (or a seek / loop wrap) to Stop or the clip end
+	void startRun(double tick, const TransportSample& s);
+	void finishRun(const TransportSample& s);
+	void updateHud();
+	void openCalibration();
+	//! Demo / self-test: KeyFall plays the clip itself with human-like mistakes
+	void scheduleAutoplay(double tick);
+
 	KeyFall* m_plugin;
 	QComboBox* m_clipCombo;
 	QComboBox* m_layoutCombo;
 	QToolButton* m_midiInButton;
 	MidiPortMenu* m_midiInMenu;
 	QLabel* m_lastEventLabel;
+	QLabel* m_hudLabel;
 	FallCanvas* m_fall;
 	KeyboardWidget* m_keyboard;
 
@@ -106,6 +118,26 @@ private:
 	bool m_supportedMode = true;
 	double m_lastShownTick = -1e300;
 	std::vector<bool> m_expected;
+
+	kf::Scorer m_scorer;
+	bool m_runActive = false;
+	bool m_restartPending = false;   //!< transport jumped: the current pass is over
+	bool m_waitForRestart = false;   //!< the run reached the clip end while the song keeps playing
+	double m_currentTick = 0;        //!< audible chart position at m_frameNs
+	double m_ticksPerSecond = 96;
+	std::int64_t m_frameNs = 0;
+	std::vector<double> m_recentDeltasMs; //!< last hits, for the live early/late readout
+
+	struct AutoplayEvent
+	{
+		std::int64_t timeNs;
+		std::uint8_t key;
+		bool on;
+	};
+	bool m_autoplay = false;
+	std::size_t m_autoplayNext = 0; //!< next chart note to schedule
+	std::vector<AutoplayEvent> m_autoplayQueue;
+	std::mt19937 m_rng{12345};
 };
 
 } // namespace lmms::gui

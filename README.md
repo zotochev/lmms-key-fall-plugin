@@ -20,6 +20,13 @@ scripts\lmms.cmd run         :: uses its own config, dev\lmmsrc-dev.xml
 scripts\lmms.cmd test        :: core tests and layout checks (no LMMS needed)
 ```
 
+## Scoring and the demo performer
+
+- While the song plays KeyFall judges every press. Afterwards it shows Notes %, Rhythm %, stars, timing feedback and a per-bar heat map.
+- **⚙ → Timing tolerance**: how strict the hit windows are (Loose / Normal / Strict).
+- **⚙ → Calibrate latency…**: tap along with the falling bars, and KeyFall subtracts the delay of your keyboard and screen.
+- **⚙ → Auto-play (demo)**: KeyFall plays the clip itself, with small mistakes. Use it as a demo and to check KeyFall without a MIDI keyboard.
+
 ## Instrument layouts
 
 KeyFall draws your keyboard (or pads) from a `*.kflayout.json` file. To add your own, see [docs/KEYBOARD_LAYOUTS.md](docs/KEYBOARD_LAYOUTS.md).

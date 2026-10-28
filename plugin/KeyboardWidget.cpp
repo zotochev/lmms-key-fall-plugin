@@ -43,7 +43,9 @@ const QColor BlackKey{0x2a, 0x2f, 0x35};
 const QColor KeyBorder{0x8a, 0x8f, 0x98};
 const QColor PadFill{0x3a, 0x40, 0x48};
 const QColor PadLabel{0xc0, 0xc4, 0xca};
-const QColor Pressed{0x56, 0xb4, 0xe9};
+const QColor PressedNeutral{0x56, 0xb4, 0xe9};
+const QColor PressedCorrect{0x00, 0x9e, 0x73};
+const QColor PressedWrong{0xd5, 0x5e, 0x00};
 const QColor ExpectedBand{0xf0, 0xe4, 0x42, 220};
 
 constexpr int Margin = 2;
@@ -63,16 +65,19 @@ void KeyboardWidget::setInstrumentLayout(std::shared_ptr<const kf::layout::Keybo
 {
 	m_layout = std::move(layout);
 	m_pressed.assign(m_layout ? m_layout->controls().size() : 0, 0);
+	m_feedback.assign(m_pressed.size(), Feedback::Neutral);
 	m_expected.assign(m_pressed.size(), false);
 	updateMapping();
 	m_cacheValid = false;
 	update();
 }
 
-void KeyboardWidget::setPressed(std::uint16_t control, std::uint8_t velocity)
+void KeyboardWidget::setPressed(std::uint16_t control, std::uint8_t velocity, Feedback feedback)
 {
-	if (control >= m_pressed.size() || m_pressed[control] == velocity) { return; }
+	if (control >= m_pressed.size()) { return; }
+	if (m_pressed[control] == velocity && (velocity == 0 || m_feedback[control] == feedback)) { return; }
 	m_pressed[control] = velocity;
+	if (velocity) { m_feedback[control] = feedback; }
 	update();
 }
 
@@ -129,8 +134,12 @@ void KeyboardWidget::updateMapping()
 
 void KeyboardWidget::paintControl(QPainter& p, const Control& control, bool pressed) const
 {
-	const QRectF r = controlRect(static_cast<std::uint16_t>(&control - m_layout->controls().data()));
+	const auto index = static_cast<std::uint16_t>(&control - m_layout->controls().data());
+	const QRectF r = controlRect(index);
 	const double radius = std::min(4.0, r.width() / 3);
+	const Feedback feedback = pressed && index < m_feedback.size() ? m_feedback[index] : Feedback::Neutral;
+	const QColor& Pressed = feedback == Feedback::Correct ? PressedCorrect
+		: feedback == Feedback::Wrong ? PressedWrong : PressedNeutral;
 	switch (control.shape)
 	{
 		case Shape::PianoWhite:
@@ -169,6 +178,14 @@ void KeyboardWidget::paintControl(QPainter& p, const Control& control, bool pres
 			}
 			break;
 		}
+	}
+	if (feedback == Feedback::Wrong)
+	{
+		// Not by colour alone: wrong notes are also hatched (colour-blind safe, PLAN.md UI/UX)
+		p.setPen(Qt::NoPen);
+		p.setBrush(QBrush(QColor(0, 0, 0, 110), Qt::BDiagPattern));
+		if (control.shape == Shape::Circle) { p.drawEllipse(r); }
+		else { p.drawRect(r.adjusted(1, 0, -1, -1)); }
 	}
 }
 
