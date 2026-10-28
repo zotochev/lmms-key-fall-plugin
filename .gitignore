@@ -1,0 +1,4 @@
+*.log
+__pycache__/
+# Runtime LMMS config, created from dev/lmmsrc-dev.template.xml by scripts/lmms.cmd
+dev/lmmsrc-dev.xml
