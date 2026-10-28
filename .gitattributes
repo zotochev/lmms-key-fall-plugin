@@ -1,0 +1,6 @@
+* text=auto
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.sh text eol=lf
+# Patches must apply byte-for-byte to the LMMS tree
+*.patch -text
