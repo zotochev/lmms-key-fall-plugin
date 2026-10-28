@@ -44,7 +44,19 @@ class KeyFall : public ToolPlugin, public MidiEventProcessor
 {
 	Q_OBJECT
 public:
+	//! How strictly note timing is judged (hit-window presets, see PLAN.md §5)
+	enum class Tolerance
+	{
+		Loose,
+		Normal,
+		Strict
+	};
+
 	KeyFall();
+
+	Tolerance tolerance() const { return m_tolerance; }
+	//! Also persists the choice in the user's LMMS config
+	void setTolerance(Tolerance tolerance);
 
 	QString nodeName() const override;
 	void saveSettings(QDomDocument&, QDomElement&) override {}
@@ -61,6 +73,7 @@ public:
 
 private:
 	MidiPort m_midiPort;
+	Tolerance m_tolerance = Tolerance::Normal;
 };
 
 } // namespace lmms

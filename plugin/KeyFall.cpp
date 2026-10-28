@@ -25,6 +25,7 @@
 #include "KeyFall.h"
 
 #include "AudioEngine.h"
+#include "ConfigManager.h"
 #include "Engine.h"
 #include "MidiClient.h"
 #include "embed.h"
@@ -45,10 +46,41 @@ PLUGIN_EXPORT Plugin* lmms_plugin_main(Model*, void*)
 }
 }
 
+namespace {
+
+const auto ConfigSection = QStringLiteral("keyfall");
+const auto ToleranceKey = QStringLiteral("tolerance");
+
+QString toleranceToString(KeyFall::Tolerance tolerance)
+{
+	switch (tolerance)
+	{
+		case KeyFall::Tolerance::Loose: return QStringLiteral("loose");
+		case KeyFall::Tolerance::Strict: return QStringLiteral("strict");
+		default: return QStringLiteral("normal");
+	}
+}
+
+KeyFall::Tolerance toleranceFromString(const QString& value)
+{
+	if (value == QLatin1String("loose")) { return KeyFall::Tolerance::Loose; }
+	if (value == QLatin1String("strict")) { return KeyFall::Tolerance::Strict; }
+	return KeyFall::Tolerance::Normal;
+}
+
+} // namespace
+
 KeyFall::KeyFall()
 	: ToolPlugin(&keyfall_plugin_descriptor, nullptr)
 	, m_midiPort(QStringLiteral("KeyFall"), Engine::audioEngine()->midiClient(), this, this, MidiPort::Mode::Input)
+	, m_tolerance(toleranceFromString(ConfigManager::inst()->value(ConfigSection, ToleranceKey)))
 {
+}
+
+void KeyFall::setTolerance(Tolerance tolerance)
+{
+	m_tolerance = tolerance;
+	ConfigManager::inst()->setValue(ConfigSection, ToleranceKey, toleranceToString(tolerance));
 }
 
 QString KeyFall::nodeName() const

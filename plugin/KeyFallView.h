@@ -29,6 +29,7 @@
 
 class QComboBox;
 class QLabel;
+class QMenu;
 class QWidget;
 
 namespace lmms {
@@ -55,12 +56,12 @@ protected:
 
 private:
 	QWidget* createToolbar();
+	QMenu* createSettingsMenu();
 	void updateKeyboardHeight();
 
 	KeyFall* m_plugin;
 	QComboBox* m_clipCombo;
 	QLabel* m_midiInLabel;
-	QComboBox* m_difficultyCombo;
 	QWidget* m_fallArea;
 	QWidget* m_keyboardArea;
 };

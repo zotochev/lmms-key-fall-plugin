@@ -24,11 +24,14 @@
 
 #include "KeyFallView.h"
 
+#include <QActionGroup>
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
 #include <QPainter>
 #include <QResizeEvent>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <algorithm>
 
@@ -73,7 +76,6 @@ KeyFallView::KeyFallView(KeyFall* plugin)
 	, m_plugin(plugin)
 	, m_clipCombo(new QComboBox())
 	, m_midiInLabel(new QLabel())
-	, m_difficultyCombo(new QComboBox())
 	, m_fallArea(new PlaceholderArea(tr("Falling notes of the selected clip will appear here")))
 	, m_keyboardArea(new PlaceholderArea(tr("Keyboard")))
 {
@@ -110,18 +112,49 @@ QWidget* KeyFallView::createToolbar()
 	m_midiInLabel->setText(tr("MIDI in: %n device(s) available", nullptr, inputs.size()));
 	m_midiInLabel->setToolTip(inputs.isEmpty() ? tr("No MIDI input devices found") : inputs.join('\n'));
 
-	m_difficultyCombo->addItems({tr("Beginner"), tr("Intermediate"), tr("Advanced")});
-	m_difficultyCombo->setCurrentIndex(1);
-	m_difficultyCombo->setToolTip(tr("Timing tolerance"));
+	auto settingsButton = new QToolButton();
+	settingsButton->setText(QStringLiteral("⚙"));
+	settingsButton->setToolTip(tr("Settings"));
+	settingsButton->setPopupMode(QToolButton::InstantPopup);
+	settingsButton->setMenu(createSettingsMenu());
 
 	layout->addWidget(new QLabel(tr("Clip:")));
 	layout->addWidget(m_clipCombo, 1);
 	layout->addSpacing(12);
 	layout->addWidget(m_midiInLabel);
 	layout->addSpacing(12);
-	layout->addWidget(new QLabel(tr("Difficulty:")));
-	layout->addWidget(m_difficultyCombo);
+	layout->addWidget(settingsButton);
 	return toolbar;
+}
+
+QMenu* KeyFallView::createSettingsMenu()
+{
+	auto menu = new QMenu(this);
+
+	auto toleranceMenu = menu->addMenu(tr("Timing tolerance"));
+	toleranceMenu->setToolTipsVisible(true);
+	auto toleranceGroup = new QActionGroup(toleranceMenu);
+	const struct
+	{
+		KeyFall::Tolerance value;
+		QString text;
+		QString hint;
+	} options[] = {
+		{KeyFall::Tolerance::Loose, tr("Loose"), tr("Forgiving timing, for learning a new piece")},
+		{KeyFall::Tolerance::Normal, tr("Normal"), tr("Default timing windows")},
+		{KeyFall::Tolerance::Strict, tr("Strict"), tr("Tight timing, for polishing rhythm")},
+	};
+	for (const auto& option : options)
+	{
+		auto action = toleranceMenu->addAction(option.text);
+		action->setToolTip(option.hint);
+		action->setCheckable(true);
+		action->setChecked(m_plugin->tolerance() == option.value);
+		toleranceGroup->addAction(action);
+		const auto value = option.value;
+		connect(action, &QAction::triggered, this, [this, value] { m_plugin->setTolerance(value); });
+	}
+	return menu;
 }
 
 void KeyFallView::resizeEvent(QResizeEvent* event)
