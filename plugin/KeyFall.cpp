@@ -27,13 +27,16 @@
 #include <algorithm>
 #include <chrono>
 
+#include <QTimer>
+
 #include "AudioEngine.h"
 #include "ConfigManager.h"
 #include "Engine.h"
 #include "InstrumentTrack.h"
-#include "MidiClient.h"
 #include "MidiEvent.h"
+#include "MidiPort.h"
 #include "Note.h"
+#include "NotePlayHandle.h"
 #include "Song.h"
 #include "embed.h"
 #include "plugin_export.h"
@@ -57,13 +60,10 @@ namespace {
 
 const auto ConfigSection = QStringLiteral("keyfall");
 const auto ToleranceKey = QStringLiteral("tolerance");
-const auto MidiInputsKey = QStringLiteral("midiinputs");
 const auto LayoutKey = QStringLiteral("layout");
 const auto LookaheadKey = QStringLiteral("lookahead");
 const auto InputOffsetKey = QStringLiteral("inputoffset");
 constexpr double MaxInputOffsetMs = 300;
-// Port names go into an XML attribute, where newlines would not survive
-const QChar MidiInputSeparator = QLatin1Char(';');
 //! Fallback when a saved layout id no longer exists
 const auto DefaultLayoutId = QStringLiteral("generic-61");
 constexpr double MinLookahead = 1.5;
@@ -100,7 +100,6 @@ const QString KeyFall::AutoLayoutId = QStringLiteral("auto");
 
 KeyFall::KeyFall()
 	: ToolPlugin(&keyfall_plugin_descriptor, nullptr)
-	, m_midiPort(QStringLiteral("KeyFall"), Engine::audioEngine()->midiClient(), this, this, MidiPort::Mode::Input)
 	, m_tolerance(toleranceFromString(ConfigManager::inst()->value(ConfigSection, ToleranceKey)))
 	, m_chart(std::make_shared<const kf::Chart>())
 {
@@ -110,12 +109,19 @@ KeyFall::KeyFall()
 	const double offset = ConfigManager::inst()->value(ConfigSection, InputOffsetKey).toDouble(&ok);
 	if (ok) { m_inputOffsetMs = std::clamp(offset, -MaxInputOffsetMs, MaxInputOffsetMs); }
 
-	restoreMidiInputs();
 	m_layouts.reload();
 	// A fresh install fits the keyboard to the clip; afterwards the user's choice is kept
 	applyLayout(ConfigManager::inst()->value(ConfigSection, LayoutKey, AutoLayoutId), false);
 
 	auto* song = Engine::getSong();
+	for (Track* track : song->tracks()) { listenToTrack(track); }
+	// trackAdded comes from Track's own constructor, before the InstrumentTrack part exists:
+	// look at the track once it is fully built
+	connect(song, &TrackContainer::trackAdded, this, [this](Track* track) {
+		QTimer::singleShot(0, this, [this, track = QPointer<Track>(track)] {
+			if (track) { listenToTrack(track); }
+		});
+	});
 	connect(song, &Song::projectLoaded, this, [this] { selectClip(nullptr); });
 	connect(song, &Song::playbackPositionJumped, this, &KeyFall::transportJumped);
 	connect(song, &Song::playbackStateChanged, this, &KeyFall::transportJumped);
@@ -132,64 +138,51 @@ QString KeyFall::nodeName() const
 	return keyfall_plugin_descriptor.name;
 }
 
-QStringList KeyFall::availableMidiInputs() const
-{
-	return Engine::audioEngine()->midiClient()->readablePorts();
-}
-
-QStringList KeyFall::subscribedMidiInputs() const
+QStringList KeyFall::listeningTracks() const
 {
 	QStringList result;
-	const auto& ports = m_midiPort.readablePorts();
-	for (auto it = ports.begin(); it != ports.end(); ++it)
+	for (Track* track : Engine::getSong()->tracks())
 	{
-		if (it.value()) { result << it.key(); }
+		auto* instrumentTrack = dynamic_cast<InstrumentTrack*>(track);
+		if (!instrumentTrack || !instrumentTrack->midiPort()->isReadable()) { continue; }
+		// LMMS can leave input switched on with no device ticked (auto-assign moving to another
+		// track does that). Raw MIDI backends list no devices and always deliver.
+		const auto& ports = instrumentTrack->midiPort()->readablePorts();
+		if (ports.isEmpty() || std::any_of(ports.begin(), ports.end(), [](bool on) { return on; }))
+		{
+			result << track->name();
+		}
 	}
 	return result;
 }
 
-void KeyFall::restoreMidiInputs()
+void KeyFall::listenToTrack(Track* track)
 {
-	auto* client = Engine::audioEngine()->midiClient();
-	if (client->isRaw()) { return; } // raw clients (e.g. OSS) have a single implicit input
-	const QStringList available = client->readablePorts();
-	// First start ("*", nothing saved yet): listen to everything, KeyFall only reads input.
-	// Afterwards: exactly what the user chose, possibly nothing.
-	const QString saved = ConfigManager::inst()->value(ConfigSection, MidiInputsKey, QStringLiteral("*"));
-	const QStringList wanted = saved == QLatin1String("*") ? available : saved.split(MidiInputSeparator, Qt::SkipEmptyParts);
-	for (const auto& port : wanted)
-	{
-		if (available.contains(port)) { m_midiPort.subscribeReadablePort(port, true); }
-	}
+	auto* instrumentTrack = dynamic_cast<InstrumentTrack*>(track);
+	if (!instrumentTrack) { return; }
+	// Direct: the press is timestamped on the thread that received it, not when the GUI gets to it.
+	// The connections die with the track.
+	connect(instrumentTrack, &InstrumentTrack::midiNoteOn, this,
+		[this, instrumentTrack](const Note& note) { trackNote(instrumentTrack, note, true); }, Qt::DirectConnection);
+	connect(instrumentTrack, &InstrumentTrack::midiNoteOff, this,
+		[this, instrumentTrack](const Note& note) { trackNote(instrumentTrack, note, false); }, Qt::DirectConnection);
 }
 
-void KeyFall::saveMidiInputs()
+void KeyFall::trackNote(InstrumentTrack* track, const Note& note, bool on)
 {
-	ConfigManager::inst()->setValue(ConfigSection, MidiInputsKey, subscribedMidiInputs().join(MidiInputSeparator));
-}
-
-void KeyFall::processInEvent(const MidiEvent& event, const TimePos&, f_cnt_t)
-{
+	const int key = note.key();
+	if (key < 0 || key >= static_cast<int>(m_keyDown.size())) { return; }
 	kf::MidiInputEvent e;
 	e.timeNs = nowNs();
-	e.channel = static_cast<std::uint8_t>(event.channel() + 1);
-	switch (event.type())
-	{
-		case MidiNoteOn:
-		case MidiNoteOff:
-			e.status = static_cast<std::uint8_t>(event.type());
-			e.data1 = static_cast<std::uint8_t>(event.key());
-			e.data2 = event.velocity();
-			break;
-		case MidiControlChange:
-			e.status = static_cast<std::uint8_t>(event.type());
-			e.data1 = event.controllerNumber();
-			e.data2 = event.controllerValue();
-			break;
-		default:
-			return;
-	}
+	// The signal carries the note handle, which knows the channel the key came in on
+	const auto* handle = dynamic_cast<const NotePlayHandle*>(&note);
+	e.channel = static_cast<std::uint8_t>((handle ? handle->midiChannel() : 0) + 1);
+	e.status = static_cast<std::uint8_t>(on ? MidiNoteOn : MidiNoteOff);
+	e.data1 = static_cast<std::uint8_t>(key);
+	e.data2 = on ? static_cast<std::uint8_t>(std::clamp(note.midiVelocity(track->midiPort()->baseVelocity()), 1, 127)) : 0;
 	const std::lock_guard lock(m_inputMutex);
+	if (m_keyDown[key] == on) { return; }
+	m_keyDown[key] = on;
 	if (m_inputQueue.size() < MaxQueuedEvents) { m_inputQueue.push_back(e); }
 }
 

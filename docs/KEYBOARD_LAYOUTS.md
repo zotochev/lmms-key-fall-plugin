@@ -120,7 +120,7 @@ How KeyFall learns the current state: exactly one source.
 | Source | When to use it |
 |---|---|
 | `"inferred": true` | The instrument sends the note that actually sounds, which is true of most MIDI concertinas. The direction follows from the note. If a note exists in both directions on different buttons, KeyFall picks the first match |
-| `"cc": 11, "ranges": {"push": [0, 63], "pull": [64, 127]}` | A bellows sensor sends a controller; the value ranges set the direction |
+| `"cc": 11, "ranges": {"push": [0, 63], "pull": [64, 127]}` | A bellows sensor sends a controller; the value ranges set the direction. The file format supports it, but the LMMS plugin gets notes from instrument tracks, which do not pass controllers on, so in LMMS the state stays at its default |
 | `"channel": {"1": "push", "2": "pull"}` | Each direction arrives on its own MIDI channel |
 | `"manual": true` | The instrument doesn't report the direction; the button in the KeyFall status line switches it |
 

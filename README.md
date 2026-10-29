@@ -9,7 +9,7 @@ The full build guide from scratch, for Windows and Linux, along with solutions t
 | What | Where |
 |---|---|
 | LMMS source | `C:\Users\mikhail\Projects\lmms`, branch `keyfall`, based on commit `bed447b` |
-| Patches for LMMS | `patches/lmms-0002-…`: the plugin list and `LMMS_EXPORT` for the MIDI classes (required). `patches/lmms-0001-…`: allows building with VS 2022 |
+| Patches for LMMS | None are needed for the plugin itself. `patches/lmms-0001-…` only lets LMMS build with VS 2022 |
 | Plugin code | `plugin/`. LMMS sees it as `plugins/KeyFall` through a junction, which `scripts\lmms.cmd configure` creates |
 | Toolchain | VS 2022, Qt 6.8.3 in `C:\Qt`, vcpkg in `C:\vcpkg` |
 

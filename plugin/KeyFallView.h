@@ -56,7 +56,6 @@ namespace lmms::gui {
 
 class FallCanvas;
 class KeyboardWidget;
-class MidiPortMenu;
 
 //! Main window: toolbar on top, falling notes in the middle and the
 //! instrument (keyboard, pads, ...) at the bottom.
@@ -118,8 +117,8 @@ private:
 	KeyFall* m_plugin;
 	QComboBox* m_clipCombo;
 	QComboBox* m_layoutCombo;
-	QToolButton* m_midiInButton;
-	MidiPortMenu* m_midiInMenu;
+	QLabel* m_midiInLabel;
+	QTimer m_midiStateTimer; //!< a track's MIDI input can be switched without any signal reaching KeyFall
 	QLabel* m_lastEventLabel;
 	QLabel* m_hudLabel;
 	QToolButton* m_bellowsButton = nullptr;

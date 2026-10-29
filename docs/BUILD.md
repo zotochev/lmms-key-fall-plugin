@@ -62,16 +62,14 @@ git checkout -b keyfall bed447baab187ea6292449048e0b1aab16082e3b
 git submodule update --init --recursive
 ```
 
-Apply the KeyFall patches:
+KeyFall needs no changes to LMMS: it uses only classes LMMS already exports, and it gets into the build through `-DPLUGIN_LIST`. The one patch is for the compiler:
 
 ```bat
-git apply ..\key-fall\patches\lmms-0002-keyfall-plugin-and-midi-exports.patch
 git apply ..\key-fall\patches\lmms-0001-allow-msvc-2022.patch
 ```
 
 | Patch | Why |
 |---|---|
-| `0002-keyfall-plugin-and-midi-exports` | Adds `KeyFall` to `LMMS_PLUGIN_LIST` and marks `MidiPort`, `MidiClient` and `MidiPortMenu` with `LMMS_EXPORT`. Without the export, the plugin won't link, because symbols in LMMS are hidden by default. **Required on every OS.** |
 | `0001-allow-msvc-2022` | **VS 2022 only.** LMMS master requires MSVC 19.51 (VS 2026). The source code doesn't need it; the restriction is a version check in CMake. Skip this patch if you have VS 2026 |
 
 The plugin code itself is not copied into LMMS. On the first run, `scripts\lmms.cmd configure` creates the junction `lmms\plugins\KeyFall → key-fall\plugin`. To keep `git status` in LMMS clean, add it to the exclusions once:
@@ -160,14 +158,13 @@ cd ~/Projects
 git clone https://github.com/LMMS/lmms.git && cd lmms
 git checkout -b keyfall bed447baab187ea6292449048e0b1aab16082e3b
 git submodule update --init --recursive
-git apply ../key-fall/patches/lmms-0002-keyfall-plugin-and-midi-exports.patch
 ln -s ../../key-fall/plugin plugins/KeyFall && echo plugins/KeyFall >> .git/info/exclude
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLMMS_MINIMAL=ON -DPLUGIN_LIST="KeyFall TapTempo MidiImport"
 cmake --build build -j"$(nproc)"
 ./build/lmms
 ```
 
-On Linux you only need patch `0002`; the MSVC patch is not needed.
+On Linux LMMS needs no patches.
 
 KeyFall core tests without LMMS:
 
@@ -191,8 +188,8 @@ To test without a keyboard: `pip install mido python-rtmidi`, then `python scrip
 | After a failed `configure`, things keep failing | Delete `lmms\build` (the vcpkg packages stay in the `C:\vcpkg` cache) |
 | `lmms.exe` won't start, a DLL is missing | Start it through `scripts\lmms.cmd run`; it adds `build\vcpkg_installed\x64-windows\bin` and Qt to PATH |
 | LMMS doesn't see the loopMIDI port | The port was created after LMMS started. Restart LMMS |
-| `unresolved external symbol ... MidiPort::MidiPort` when linking `keyfall.dll` | Patch `0002` (`LMMS_EXPORT`) was not applied, or LMMS was not rebuilt after it |
 | `add_subdirectory given source "KeyFall" which is not an existing directory` | The `lmms\plugins\KeyFall` junction is missing. Run `scripts\lmms.cmd configure`, which creates it |
 | KeyFall is missing from the Tools menu | `keyfall.dll` is not in `build\plugins`: check that `KeyFall` is in `PLUGIN_LIST` |
-| KeyFall highlights the keys, but the track is silent after LMMS starts | This is how LMMS behaves, not KeyFall: auto-assign (`midiautoassign`) connects the port when the track is created, but loading the project template then turns its MIDI input off. Auto-assign happens again when the instrument's keyboard gets focus. Click once in the track's instrument window (or in Piano Roll), or tick the port in the track's ⚙ → MIDI → Input |
+| KeyFall shows "MIDI in: no track" and keys don't light up | KeyFall hears the keyboard through instrument tracks, so at least one track must take MIDI input. After LMMS starts this is often off: auto-assign (`midiautoassign`) connects the port when the track is created, but loading the project template then turns its MIDI input off. Auto-assign happens again when the instrument's keyboard gets focus. Click once in the track's instrument window (or in Piano Roll), or tick the port in the track's ⚙ → MIDI → Input |
+| A held key stays lit after release | The sustain pedal is down: LMMS reports the release only when the pedal comes up |
 | Notes arrive (the keys light up) but there is no sound | Edit → Settings → Audio: check the device. Click a key on the instrument's keyboard with the mouse to test |

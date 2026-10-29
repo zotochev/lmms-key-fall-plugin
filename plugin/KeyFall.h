@@ -26,6 +26,7 @@
 #define LMMS_KEYFALL_H
 
 #include <QPointer>
+#include <array>
 #include <QStringList>
 #include <QVector>
 #include <memory>
@@ -35,13 +36,13 @@
 #include "KeyFallView.h"
 #include "LayoutRepository.h"
 #include "MidiClip.h"
-#include "MidiEventProcessor.h"
-#include "MidiPort.h"
 #include "ToolPlugin.h"
 #include "core/Chart.h"
 #include "core/InputResolver.h"
 
 namespace lmms {
+
+class InstrumentTrack;
 
 //! One clip the user can practise
 struct ClipChoice
@@ -67,9 +68,10 @@ struct TransportSample
 //! survives project reloads) and is never saved into a project: per-user
 //! settings go through ConfigManager instead of saveSettings/loadSettings.
 //!
-//! Owns its own input-only MidiPort, so the user's keyboard can be listened to
-//! without touching any instrument track. KeyFall never produces MIDI output.
-class KeyFall : public ToolPlugin, public MidiEventProcessor
+//! Hears the user's keyboard through the instrument tracks: every track reports the
+//! notes that reach it from MIDI input (the signals Piano Roll recording uses), so no
+//! MIDI port of its own and no LMMS patch are needed. KeyFall never produces MIDI output.
+class KeyFall : public ToolPlugin
 {
 	Q_OBJECT
 public:
@@ -99,20 +101,11 @@ public:
 
 	// --- MIDI input -------------------------------------------------------
 
-	MidiPort* midiPort() { return &m_midiPort; }
-	//! Names of MIDI inputs offered by the current MIDI backend
-	QStringList availableMidiInputs() const;
-	//! Inputs KeyFall currently listens to
-	QStringList subscribedMidiInputs() const;
-	//! Stores the current subscriptions so they are restored on the next start
-	void saveMidiInputs();
+	//! Names of the instrument tracks whose MIDI input is switched on
+	QStringList listeningTracks() const;
 
 	//! Moves all MIDI events received since the last call into out (GUI thread)
 	void drainInput(std::vector<kf::MidiInputEvent>& out);
-
-	// Called on the MIDI driver thread
-	void processInEvent(const MidiEvent& event, const TimePos& = TimePos(), f_cnt_t = 0) override;
-	void processOutEvent(const MidiEvent&, const TimePos& = TimePos(), f_cnt_t = 0) override {}
 
 	// --- Instrument layouts -----------------------------------------------
 
@@ -148,11 +141,12 @@ signals:
 	void transportJumped();
 
 private:
-	void restoreMidiInputs();
+	void listenToTrack(Track* track);
+	//! Called on the MIDI driver thread (or the audio thread for sustain-pedal releases)
+	void trackNote(InstrumentTrack* track, const Note& note, bool on);
 	void rebuildChart();
 	void applyLayout(const QString& id, bool persist);
 
-	MidiPort m_midiPort;
 	Tolerance m_tolerance = Tolerance::Normal;
 	double m_inputOffsetMs = 0;
 
@@ -160,6 +154,8 @@ private:
 	//! multi-producer queue; a short mutex is fine because it is never the audio thread.
 	std::mutex m_inputMutex;
 	std::vector<kf::MidiInputEvent> m_inputQueue;
+	//! Several tracks may hear the same keyboard: each key is reported once
+	std::array<bool, 128> m_keyDown{};
 
 	LayoutRepository m_layouts;
 	QString m_currentLayoutId;

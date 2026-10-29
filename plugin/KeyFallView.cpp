@@ -52,7 +52,6 @@
 #include "FallCanvas.h"
 #include "KeyFall.h"
 #include "KeyboardWidget.h"
-#include "MidiPortMenu.h"
 #include "SamplePlayHandle.h"
 
 namespace lmms::gui {
@@ -97,8 +96,7 @@ KeyFallView::KeyFallView(KeyFall* plugin)
 	, m_plugin(plugin)
 	, m_clipCombo(new ClipCombo())
 	, m_layoutCombo(new QComboBox())
-	, m_midiInButton(new QToolButton())
-	, m_midiInMenu(new MidiPortMenu(MidiPort::Mode::Input))
+	, m_midiInLabel(new QLabel())
 	, m_lastEventLabel(new QLabel())
 	, m_hudLabel(new QLabel())
 	, m_keyboard(new KeyboardWidget())
@@ -130,6 +128,8 @@ KeyFallView::KeyFallView(KeyFall* plugin)
 	connect(&m_frameTimer, &QTimer::timeout, this, &KeyFallView::tick);
 	m_frameTimer.setTimerType(Qt::PreciseTimer);
 	m_frameTimer.setInterval(FrameIntervalMs);
+	connect(&m_midiStateTimer, &QTimer::timeout, this, &KeyFallView::updateMidiInState);
+	m_midiStateTimer.setInterval(1000);
 
 	populateLayoutCombo();
 	populateClipCombo();
@@ -168,14 +168,8 @@ QWidget* KeyFallView::createToolbar()
 		m_plugin->selectLayout(m_layoutCombo->itemData(index).toString());
 	});
 
-	m_midiInMenu->setModel(m_plugin->midiPort());
-	connect(m_midiInMenu, &QMenu::triggered, this, [this] {
-		m_plugin->saveMidiInputs();
-		updateMidiInState();
-	});
-	m_midiInButton->setMenu(m_midiInMenu);
-	m_midiInButton->setPopupMode(QToolButton::InstantPopup);
-	m_midiInButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+	m_midiInLabel->setToolTip(tr("KeyFall hears what you play into instrument tracks whose MIDI input is on "
+		"(track ⚙ → MIDI → Input). It never changes what your tracks hear."));
 
 	auto settingsButton = new QToolButton();
 	settingsButton->setText(QStringLiteral("⚙"));
@@ -187,7 +181,7 @@ QWidget* KeyFallView::createToolbar()
 	layout->addWidget(m_clipCombo, 1);
 	layout->addSpacing(8);
 	layout->addWidget(m_layoutCombo);
-	layout->addWidget(m_midiInButton);
+	layout->addWidget(m_midiInLabel);
 	layout->addWidget(settingsButton);
 	return toolbar;
 }
@@ -488,28 +482,22 @@ void KeyFallView::onChartChanged()
 
 void KeyFallView::updateMidiInState()
 {
-	const QStringList available = m_plugin->availableMidiInputs();
-	const QStringList subscribed = m_plugin->subscribedMidiInputs();
-	if (available.isEmpty())
+	const QStringList tracks = m_plugin->listeningTracks();
+	QString problem;
+	if (tracks.isEmpty())
 	{
-		m_midiInButton->setText(tr("MIDI in: no devices"));
-		m_midiProblem = tr("No MIDI input device found. Connect a MIDI keyboard and choose a MIDI backend in "
-			"Edit → Settings → MIDI, then restart LMMS. Without a keyboard you can use a virtual MIDI "
-			"cable (e.g. loopMIDI) and scripts/virtual_player.py.");
-	}
-	else if (subscribed.isEmpty())
-	{
-		m_midiInButton->setText(tr("MIDI in: none selected"));
-		m_midiProblem = tr("Choose your MIDI keyboard in the “MIDI in” menu above.");
+		m_midiInLabel->setText(tr("MIDI in: no track"));
+		problem = tr("No instrument track takes MIDI input, so KeyFall hears nothing. Click once into an "
+			"instrument's window, or tick your keyboard in the track's ⚙ → MIDI → Input. No keyboard? "
+			"Use a virtual MIDI cable (e.g. loopMIDI) and scripts/virtual_player.py.");
 	}
 	else
 	{
-		m_midiInButton->setText(subscribed.size() == 1 ? tr("MIDI in: %1").arg(subscribed.front())
-			: tr("MIDI in: %1 devices").arg(subscribed.size()));
-		m_midiProblem.clear();
+		m_midiInLabel->setText(tracks.size() == 1 ? tr("MIDI in: %1").arg(tracks.front())
+			: tr("MIDI in: %1 tracks").arg(tracks.size()));
 	}
-	m_midiInButton->setToolTip(available.isEmpty() ? tr("No MIDI input devices found")
-		: tr("Devices KeyFall listens to (it never changes what your tracks hear)"));
+	if (problem == m_midiProblem) { return; }
+	m_midiProblem = problem;
 	updateMessage();
 }
 
@@ -1038,11 +1026,13 @@ void KeyFallView::showEvent(QShowEvent* event)
 	updateMidiInState();
 	m_clock.reset();
 	m_frameTimer.start();
+	m_midiStateTimer.start();
 }
 
 void KeyFallView::hideEvent(QHideEvent* event)
 {
 	m_frameTimer.stop();
+	m_midiStateTimer.stop();
 	ToolPluginView::hideEvent(event);
 }
 
