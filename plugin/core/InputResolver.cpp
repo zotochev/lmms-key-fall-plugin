@@ -26,15 +26,38 @@
 
 #include "KeyboardLayout.h"
 
+#include <algorithm>
+
 namespace kf {
 
 namespace {
 constexpr std::uint8_t NoteOff = 0x80;
 constexpr std::uint8_t NoteOn = 0x90;
+constexpr std::uint8_t ControlChange = 0xB0;
 } // namespace
 
-std::optional<PressEvent> InputResolver::resolve(const MidiInputEvent& event) const
+void InputResolver::setLayout(const layout::KeyboardLayout* layout)
 {
+	m_layout = layout;
+	m_held.clear();
+	m_state = layout && layout->state() ? layout->state()->defaultValue : -1;
+}
+
+std::optional<PressEvent> InputResolver::resolve(const MidiInputEvent& event)
+{
+	const auto* state = m_layout && m_layout->state() ? &*m_layout->state() : nullptr;
+	if (event.status == ControlChange)
+	{
+		if (state && state->source == layout::StateVar::Source::Cc && event.data1 == state->cc)
+		{
+			for (std::size_t i = 0; i < state->ccRanges.size(); ++i)
+			{
+				const auto [lo, hi] = state->ccRanges[i];
+				if (event.data2 >= lo && event.data2 <= hi) { m_state = static_cast<int>(i); }
+			}
+		}
+		return std::nullopt;
+	}
 	if ((event.status != NoteOn && event.status != NoteOff) || event.data1 >= layout::NumPitches)
 	{
 		return std::nullopt;
@@ -45,7 +68,44 @@ std::optional<PressEvent> InputResolver::resolve(const MidiInputEvent& event) co
 	press.channel = event.channel;
 	press.on = event.status == NoteOn && event.data2 > 0;
 	press.velocity = press.on ? event.data2 : 0;
-	if (m_layout) { press.control = m_layout->controlForInput(event.channel, event.data1); }
+	if (!m_layout) { return press; }
+
+	const std::pair<int, int> key(event.channel, event.data1);
+	if (!press.on)
+	{
+		const auto held = m_held.find(key);
+		if (held != m_held.end())
+		{
+			press.control = held->second.first;
+			press.state = held->second.second;
+			m_held.erase(held);
+		}
+		else { press.control = m_layout->controlForInput(event.channel, event.data1); }
+		return press;
+	}
+
+	int known = -1;
+	if (state)
+	{
+		switch (state->source)
+		{
+			case layout::StateVar::Source::Cc:
+			case layout::StateVar::Source::Manual: known = m_state; break;
+			case layout::StateVar::Source::Channel:
+				known = state->channelValue[std::clamp<int>(event.channel, 0, 16)];
+				if (known >= 0) { m_state = known; }
+				break;
+			case layout::StateVar::Source::Inferred: break; // the pitch tells
+		}
+	}
+	if (const auto r = m_layout->resolve(event.channel, event.data1, known))
+	{
+		press.control = r->control;
+		press.state = r->state;
+		if (state && state->source == layout::StateVar::Source::Inferred && r->state >= 0) { m_state = r->state; }
+	}
+	else { press.state = known; }
+	m_held[key] = {press.control, press.state};
 	return press;
 }
 

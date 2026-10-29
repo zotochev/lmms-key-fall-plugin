@@ -2,7 +2,7 @@
 
 KeyFall draws your instrument from a layout file, not from settings hard-coded in C++. If your MIDI keyboard or controller isn't in the list, you can describe it yourself in a small JSON file and, if you like, send it to the project.
 
-The bigger plan (concertinas, accordions, hex grids) is in [PLAN.md §3a](../PLAN.md). Format version 2 currently supports **keyboards** (`piano`) and **pads/grids** (`grid`).
+The bigger plan (concertinas, accordions, hex grids) is in [PLAN.md §3a](../PLAN.md). Format version 2 currently supports **keyboards** (`piano`), **pads/grids** (`grid`) and **button rows** (`rows`: concertinas, button boxes), including **bisonoric** instruments, where one button sounds different notes on push and pull.
 
 ## Quick start
 
@@ -56,7 +56,7 @@ Unknown fields produce a W001 warning and are ignored. This lets new versions ad
 
 | Field | Description |
 |---|---|
-| `type` | `"piano"` or `"grid"`. `hex` and `rows` (concertinas, accordions) come in later versions |
+| `type` | `"piano"`, `"grid"` or `"rows"`. `hex` (isomorphic hex grids) comes in a later version |
 | `id` | Unique within the file. Default: `z0`, `z1`, … |
 | `label` | Zone caption |
 | `hand` | `"left"`, `"right"`, `"none"`: which hand plays the zone |
@@ -88,6 +88,47 @@ Or use a formula, `note = startNote + col × colStep + row × rowStep`. Here `ro
 Fourths-based isomorphic layouts (Linnstrument-like) work the same way: `"rowStep": 5`. The same note may sit on several pads; KeyFall treats them all as correct.
 
 `shape` is `"roundRect"` (the default), `"rect"` or `"circle"`.
+
+### `rows` zone: button rows
+
+Rows of round buttons. Every second row is shifted by half a button, as on concertinas and button boxes. Each row lists its notes from left to right as the player sees the instrument:
+
+```json
+{ "id": "L", "hand": "left", "type": "rows", "rows": [
+    { "notes": ["C3", "G3", "C4", "E4", "G4"] },
+    { "notes": ["G3", "D4", "G4", "B4", "D5"], "offset": 0.5 } ] }
+```
+
+- `offset`: the row's horizontal shift in buttons. By default it is 0 for even rows and 0.5 for odd rows.
+- `null` instead of a note: the button is silent (an air button, or no note in this direction).
+- `shape`: `"circle"` (the default), `"roundRect"` or `"rect"`.
+- For two ends of an instrument, make two zones and set the second one's `position`, e.g. `[7.5, 0]`.
+
+### Instrument states: push and pull (bisonoric)
+
+Needed when a button's note depends on a state, for example the bellows direction on an Anglo concertina or a diatonic button accordion. Declare the state at the top level, then give a row's notes per state:
+
+```json
+"requires": ["states", "rows"],
+"states": { "bellows": { "values": ["push", "pull"], "inferred": true, "default": "push" } },
+"zones": [ { "type": "rows", "rows": [
+    { "notes": { "push": ["C3", "G3", "C4"], "pull": ["G3", "B3", "D4"] } } ] } ]
+```
+
+How KeyFall learns the current state: exactly one source.
+
+| Source | When to use it |
+|---|---|
+| `"inferred": true` | The instrument sends the note that actually sounds, which is true of most MIDI concertinas. The direction follows from the note. If a note exists in both directions on different buttons, KeyFall picks the first match |
+| `"cc": 11, "ranges": {"push": [0, 63], "pull": [64, 127]}` | A bellows sensor sends a controller; the value ranges set the direction |
+| `"channel": {"1": "push", "2": "pull"}` | Each direction arrives on its own MIDI channel |
+| `"manual": true` | The instrument doesn't report the direction; the button in the KeyFall status line switches it |
+
+Every state must have the same number of buttons in each row. `requires` lists the format features the file needs. An older KeyFall reading a file with an unknown feature reports E012 instead of drawing the layout wrongly.
+
+On the keyboard, bisonoric buttons have two labels: the push note on top and the pull note below. The note for the current bellows direction is brighter, and the status line shows `bellows: ▶◀ push` or `◀▶ pull`.
+
+The built-in **Anglo concertina, 20 buttons, C/G** (`anglo-20-cg`) is a complete example.
 
 ### Example: keys plus pads
 
@@ -125,10 +166,13 @@ Both checkers report the same codes: the plugin and `kflayout-lint` (C++), and `
 | E009 | Grid: `rows`/`cols` outside 1–32, `notes` doesn't have rows×cols entries, or neither `notes` nor `startNote` is given |
 | E010 | Channel is not `"any"` and not 1–16 |
 | E011 | Duplicate zone `id` |
-| E012 | The feature needs a newer KeyFall version (`states`, `requires`, `hex`/`rows` zones, chord buttons) |
+| E012 | The feature needs a newer KeyFall version: an unknown feature in `requires`, more than one state, `hex` zones, chord buttons |
 | E013 | More than 1024 controls |
 | E014 | Wrong value type or a value that isn't allowed |
 | E015 | Both `piano` and `zones` are given |
+| E016 | Notes per state: a state is missing, there is an unknown state, or `states` isn't declared |
+| E017 | Invalid `states` declaration: no or several sources, fewer than two `values`, invalid `cc`/`ranges`/`channel`/`default` |
+| E019 | Invalid `rows` zone: no rows, a row without `notes`, states with different button counts, a button with no note in any state, invalid `offset` |
 | W001 | Unknown field, ignored |
 | W002 | `octaveShift` from format 1 is not supported yet, ignored |
 | W003 | `units` other than `"key"`, ignored |

@@ -61,6 +61,9 @@ public:
 	//! Controls whose chart notes are sounding now get a yellow "play me" band
 	void setExpected(const std::vector<bool>& expected);
 
+	//! Current instrument state (bellows direction) of stateful layouts; highlights that state's note labels
+	void setInstrumentState(int state);
+
 	//! Control geometry in widget coordinates
 	QRectF controlRect(std::uint16_t control) const;
 
@@ -77,6 +80,7 @@ private:
 	std::vector<std::uint8_t> m_pressed; //!< velocity per control, 0 = up
 	std::vector<Feedback> m_feedback;
 	std::vector<bool> m_expected;
+	int m_state = -1;
 	QPixmap m_cache;
 	bool m_cacheValid = false;
 	// layout units -> widget pixels

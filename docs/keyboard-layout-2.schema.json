@@ -4,31 +4,64 @@
   "title": "KeyFall instrument layout (format 2)",
   "description": "Structure of *.kflayout.json files. Editors use it for completion; the semantic rules (error codes E0xx) live in docs/KEYBOARD_LAYOUTS.md and are checked by scripts/validate_layouts.py and kflayout-lint.",
   "type": "object",
-  "required": ["format", "id", "name"],
+  "required": [
+    "format",
+    "id",
+    "name"
+  ],
   "properties": {
-    "$schema": { "type": "string" },
-    "format": { "const": 2, "description": "Format version. Files with format 1 are still accepted and migrated." },
+    "$schema": {
+      "type": "string"
+    },
+    "format": {
+      "const": 2,
+      "description": "Format version. Files with format 1 are still accepted and migrated."
+    },
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
       "maxLength": 64,
       "description": "Unique id; also the file name (<id>.kflayout.json). A user layout with the id of a built-in one replaces it."
     },
-    "name": { "type": "string", "minLength": 1, "description": "Shown in the layout list." },
-    "author": { "type": "string" },
-    "license": { "type": "string", "description": "SPDX id, e.g. CC0-1.0 (used for built-in layouts)." },
-    "description": { "type": "string" },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Shown in the layout list."
+    },
+    "author": {
+      "type": "string"
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX id, e.g. CC0-1.0 (used for built-in layouts)."
+    },
+    "description": {
+      "type": "string"
+    },
     "match": {
       "type": "object",
       "properties": {
-        "midiPort": { "type": "string", "description": "Substring of the MIDI port name for automatic selection (planned)." }
+        "midiPort": {
+          "type": "string",
+          "description": "Substring of the MIDI port name for automatic selection (planned)."
+        }
       },
       "additionalProperties": false
     },
-    "units": { "const": "key", "description": "Geometry unit: one white piano key. Only \"key\" is supported." },
+    "units": {
+      "const": "key",
+      "description": "Geometry unit: one white piano key. Only \"key\" is supported."
+    },
     "piano": {
       "type": "array",
-      "prefixItems": [ { "$ref": "#/$defs/note" }, { "$ref": "#/$defs/note" } ],
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/note"
+        },
+        {
+          "$ref": "#/$defs/note"
+        }
+      ],
       "minItems": 2,
       "maxItems": 2,
       "description": "Shorthand for a plain keyboard: [firstNote, lastNote], e.g. [\"C2\", \"C6\"]."
@@ -36,35 +69,187 @@
     "zones": {
       "type": "array",
       "minItems": 1,
-      "items": { "oneOf": [ { "$ref": "#/$defs/pianoZone" }, { "$ref": "#/$defs/gridZone" } ] }
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/pianoZone"
+          },
+          {
+            "$ref": "#/$defs/gridZone"
+          },
+          {
+            "$ref": "#/$defs/rowsZone"
+          }
+        ]
+      }
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "states",
+          "rows"
+        ]
+      },
+      "description": "Format features this file needs; older KeyFall versions refuse unknown ones (E012)."
+    },
+    "states": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "description": "One instrument state that changes the note of a button, e.g. the bellows of an Anglo concertina.",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "values"
+        ],
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 2,
+            "uniqueItems": true
+          },
+          "inferred": {
+            "const": true,
+            "description": "The state follows from the received pitch (most MIDI concertinas)."
+          },
+          "manual": {
+            "const": true,
+            "description": "Switched by the user in the KeyFall status line."
+          },
+          "cc": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 127,
+            "description": "Controller of a bellows sensor."
+          },
+          "ranges": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 127
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "channel": {
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^([1-9]|1[0-6])$"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "default": {
+            "type": "string"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "inferred"
+            ]
+          },
+          {
+            "required": [
+              "manual"
+            ]
+          },
+          {
+            "required": [
+              "cc",
+              "ranges"
+            ]
+          },
+          {
+            "required": [
+              "channel"
+            ]
+          }
+        ]
+      }
     }
   },
-  "oneOf": [ { "required": ["piano"] }, { "required": ["zones"] } ],
+  "oneOf": [
+    {
+      "required": [
+        "piano"
+      ]
+    },
+    {
+      "required": [
+        "zones"
+      ]
+    }
+  ],
   "$defs": {
     "note": {
       "description": "MIDI note number 0-127 or a note name: C4 = 60, C#4 / Db4 = 61, C-1 = 0.",
       "oneOf": [
-        { "type": "integer", "minimum": 0, "maximum": 127 },
-        { "type": "string", "pattern": "^[A-G][#b]?-?[0-9]{1,2}$" }
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 127
+        },
+        {
+          "type": "string",
+          "pattern": "^[A-G][#b]?-?[0-9]{1,2}$"
+        }
       ]
     },
     "channel": {
-      "oneOf": [ { "const": "any" }, { "type": "integer", "minimum": 1, "maximum": 16 } ]
+      "oneOf": [
+        {
+          "const": "any"
+        },
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        }
+      ]
     },
     "zoneCommon": {
       "type": "object",
       "properties": {
-        "id": { "type": "string", "minLength": 1, "description": "Unique within the layout; defaults to z<index>." },
-        "label": { "type": "string" },
-        "hand": { "enum": ["left", "right", "none"] },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique within the layout; defaults to z<index>."
+        },
+        "label": {
+          "type": "string"
+        },
+        "hand": {
+          "enum": [
+            "left",
+            "right",
+            "none"
+          ]
+        },
         "input": {
           "type": "object",
-          "properties": { "channel": { "$ref": "#/$defs/channel" } },
+          "properties": {
+            "channel": {
+              "$ref": "#/$defs/channel"
+            }
+          },
           "additionalProperties": false
         },
         "position": {
           "type": "array",
-          "items": { "type": "number" },
+          "items": {
+            "type": "number"
+          },
           "minItems": 2,
           "maxItems": 2,
           "description": "[x, y] of the zone's top-left corner in key units. By default zones are placed left to right."
@@ -72,35 +257,186 @@
       }
     },
     "pianoZone": {
-      "allOf": [ { "$ref": "#/$defs/zoneCommon" } ],
+      "allOf": [
+        {
+          "$ref": "#/$defs/zoneCommon"
+        }
+      ],
       "type": "object",
-      "required": ["type", "firstNote", "lastNote"],
+      "required": [
+        "type",
+        "firstNote",
+        "lastNote"
+      ],
       "properties": {
-        "type": { "const": "piano" },
-        "firstNote": { "$ref": "#/$defs/note" },
-        "lastNote": { "$ref": "#/$defs/note" }
+        "type": {
+          "const": "piano"
+        },
+        "firstNote": {
+          "$ref": "#/$defs/note"
+        },
+        "lastNote": {
+          "$ref": "#/$defs/note"
+        }
       }
     },
     "gridZone": {
-      "allOf": [ { "$ref": "#/$defs/zoneCommon" } ],
+      "allOf": [
+        {
+          "$ref": "#/$defs/zoneCommon"
+        }
+      ],
       "type": "object",
-      "required": ["type", "rows", "cols"],
+      "required": [
+        "type",
+        "rows",
+        "cols"
+      ],
       "properties": {
-        "type": { "const": "grid" },
-        "rows": { "type": "integer", "minimum": 1, "maximum": 32 },
-        "cols": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "type": {
+          "const": "grid"
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "cols": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
         "notes": {
           "type": "array",
-          "items": { "$ref": "#/$defs/note" },
+          "items": {
+            "$ref": "#/$defs/note"
+          },
           "description": "Exactly rows x cols notes, top row first, left to right."
         },
-        "startNote": { "$ref": "#/$defs/note", "description": "Note of the first pad when notes are computed: startNote + col*colStep + row*rowStep." },
-        "colStep": { "type": "integer", "minimum": -127, "maximum": 127, "default": 1 },
-        "rowStep": { "type": "integer", "minimum": -127, "maximum": 127, "description": "Defaults to cols." },
-        "rowOrder": { "enum": ["bottomUp", "topDown"], "default": "bottomUp", "description": "Which row is row 0 in the formula." },
-        "shape": { "enum": ["rect", "roundRect", "circle"], "default": "roundRect" }
+        "startNote": {
+          "$ref": "#/$defs/note",
+          "description": "Note of the first pad when notes are computed: startNote + col*colStep + row*rowStep."
+        },
+        "colStep": {
+          "type": "integer",
+          "minimum": -127,
+          "maximum": 127,
+          "default": 1
+        },
+        "rowStep": {
+          "type": "integer",
+          "minimum": -127,
+          "maximum": 127,
+          "description": "Defaults to cols."
+        },
+        "rowOrder": {
+          "enum": [
+            "bottomUp",
+            "topDown"
+          ],
+          "default": "bottomUp",
+          "description": "Which row is row 0 in the formula."
+        },
+        "shape": {
+          "enum": [
+            "rect",
+            "roundRect",
+            "circle"
+          ],
+          "default": "roundRect"
+        }
       },
-      "oneOf": [ { "required": ["notes"] }, { "required": ["startNote"] } ]
+      "oneOf": [
+        {
+          "required": [
+            "notes"
+          ]
+        },
+        {
+          "required": [
+            "startNote"
+          ]
+        }
+      ]
+    },
+    "noteOrSilent": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/note"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rowNotes": {
+      "description": "Notes left to right; or one list per state, e.g. {\"push\": [...], \"pull\": [...]}.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/noteOrSilent"
+          },
+          "minItems": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/noteOrSilent"
+            },
+            "minItems": 1
+          }
+        }
+      ]
+    },
+    "rowsZone": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/zoneCommon"
+        }
+      ],
+      "type": "object",
+      "required": [
+        "type",
+        "rows"
+      ],
+      "properties": {
+        "type": {
+          "const": "rows"
+        },
+        "shape": {
+          "enum": [
+            "rect",
+            "roundRect",
+            "circle"
+          ],
+          "default": "circle"
+        },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "notes"
+            ],
+            "properties": {
+              "notes": {
+                "$ref": "#/$defs/rowNotes"
+              },
+              "offset": {
+                "type": "number",
+                "description": "Shift in buttons; default 0 for even rows, 0.5 for odd rows."
+              },
+              "label": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

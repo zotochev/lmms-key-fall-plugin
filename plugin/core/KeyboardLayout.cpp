@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <initializer_list>
 #include <limits>
 
@@ -42,6 +43,7 @@ constexpr std::array<float, 12> BlackKeyOffset = {0, -0.08f, 0, 0.08f, 0, 0, -0.
 
 constexpr float GridCellSize = 1.0f;
 constexpr float GridCellPitch = 1.15f;
+constexpr float ButtonRowPitch = 1.0f; // staggered rows sit closer than grid rows
 constexpr float ZoneGap = 0.5f;
 constexpr int MaxGridSide = 32;
 
@@ -131,6 +133,7 @@ public:
 
 		parseMeta(root);
 		parseRequires(root);
+		parseStates(root);
 
 		const auto* piano = root.find("piano");
 		const auto* zones = root.find("zones");
@@ -292,19 +295,15 @@ private:
 
 	void parseRequires(const json::Value& root)
 	{
-		if (root.find("states"))
-		{
-			error("E012", "/states", "instrument states (e.g. bellows push/pull) need a newer KeyFall version");
-		}
 		const auto* required = root.find("requires");
 		if (!required) { return; }
 		if (!required->isArray()) { error("E014", "/requires", "\"requires\" must be an array of feature names"); return; }
-		// No optional features exist yet: anything requested is newer than this build
 		for (std::size_t i = 0; i < required->asArray().size(); ++i)
 		{
 			const auto& feature = required->asArray()[i];
-			error("E012", at("/requires", i), "feature \"" + std::string(feature.isString() ? feature.asString() : "?")
-				+ "\" needs a newer KeyFall version");
+			const std::string name = feature.isString() ? feature.asString() : "?";
+			if (name == "states" || name == "rows") { continue; } // supported by this version
+			error("E012", at("/requires", i), "feature \"" + name + "\" needs a newer KeyFall version");
 		}
 	}
 
@@ -406,11 +405,260 @@ private:
 			const auto type = optionalString(zone, "type", pointer);
 			if (type == "piano") { parsePianoZone(zone, i, pointer); }
 			else if (type == "grid") { parseGridZone(zone, i, pointer); }
-			else if (type == "hex" || type == "rows")
+			else if (type == "rows") { parseRowsZone(zone, i, pointer); }
+			else if (type == "hex")
 			{
 				error("E012", at(pointer, "type"), "zone type \"" + *type + "\" needs a newer KeyFall version");
 			}
-			else { error("E006", at(pointer, "type"), "zone \"type\" must be \"piano\" or \"grid\""); }
+			else { error("E006", at(pointer, "type"), "zone \"type\" must be \"piano\", \"grid\" or \"rows\""); }
+		}
+	}
+
+	void parseStates(const json::Value& root)
+	{
+		const auto* states = root.find("states");
+		if (!states) { return; }
+		if (!states->isObject() || states->asObject().empty())
+		{
+			error("E017", "/states", "\"states\" must be an object with one state, e.g. {\"bellows\": {...}}");
+			return;
+		}
+		if (states->asObject().size() > 1)
+		{
+			error("E012", "/states", "more than one state variable needs a newer KeyFall version");
+			return;
+		}
+		const auto& [name, def] = *states->asObject().begin();
+		const std::string ptr = at("/states", name);
+		if (!def.isObject()) { error("E017", ptr, "a state must be an object"); return; }
+		checkKeys(def, {"values", "cc", "ranges", "channel", "inferred", "manual", "default"}, ptr);
+
+		StateVar v;
+		v.name = name;
+		const auto* values = def.find("values");
+		if (!values || !values->isArray() || values->asArray().size() < 2)
+		{
+			error("E017", at(ptr, "values"), "\"values\" must list at least two state names, e.g. [\"push\", \"pull\"]");
+			return;
+		}
+		for (std::size_t i = 0; i < values->asArray().size(); ++i)
+		{
+			const auto& value = values->asArray()[i];
+			if (!value.isString() || value.asString().empty() || v.indexOf(value.asString()) >= 0)
+			{
+				error("E017", at(at(ptr, "values"), i), "state names must be unique, non-empty strings");
+				return;
+			}
+			v.values.push_back(value.asString());
+		}
+
+		const bool inferred = def.find("inferred") && def.find("inferred")->isBool() && def.find("inferred")->asBool();
+		const bool manual = def.find("manual") && def.find("manual")->isBool() && def.find("manual")->asBool();
+		const int sources = (def.find("cc") ? 1 : 0) + (def.find("channel") ? 1 : 0) + (inferred ? 1 : 0) + (manual ? 1 : 0);
+		if (sources != 1)
+		{
+			error("E017", ptr, "a state needs exactly one source: \"cc\" (+ \"ranges\"), \"channel\", \"inferred\": true or \"manual\": true");
+			return;
+		}
+		if (const auto* cc = def.find("cc"))
+		{
+			v.source = StateVar::Source::Cc;
+			if (!isInteger(*cc) || cc->asNumber() < 0 || cc->asNumber() > 127)
+			{
+				error("E017", at(ptr, "cc"), "\"cc\" must be a controller number 0-127");
+				return;
+			}
+			v.cc = static_cast<int>(cc->asNumber());
+			const auto* ranges = def.find("ranges");
+			if (!ranges || !ranges->isObject())
+			{
+				error("E017", at(ptr, "ranges"), "\"ranges\" must map each state to [low, high], e.g. {\"push\": [0, 63]}");
+				return;
+			}
+			v.ccRanges.assign(v.values.size(), {-1, -1});
+			for (const auto& [value, range] : ranges->asObject())
+			{
+				const int index = v.indexOf(value);
+				const bool ok = index >= 0 && range.isArray() && range.asArray().size() == 2 && isInteger(range.asArray()[0])
+					&& isInteger(range.asArray()[1]) && range.asArray()[0].asNumber() >= 0
+					&& range.asArray()[1].asNumber() <= 127 && range.asArray()[0].asNumber() <= range.asArray()[1].asNumber();
+				if (!ok)
+				{
+					error("E017", at(at(ptr, "ranges"), value), "each range must be a known state and [low, high] within 0-127");
+					return;
+				}
+				v.ccRanges[index] = {static_cast<int>(range.asArray()[0].asNumber()), static_cast<int>(range.asArray()[1].asNumber())};
+			}
+		}
+		else if (const auto* channels = def.find("channel"))
+		{
+			v.source = StateVar::Source::Channel;
+			if (!channels->isObject())
+			{
+				error("E017", at(ptr, "channel"), "\"channel\" must map MIDI channels to states, e.g. {\"1\": \"push\", \"2\": \"pull\"}");
+				return;
+			}
+			for (const auto& [channel, value] : channels->asObject())
+			{
+				const int ch = std::atoi(channel.c_str());
+				const int index = value.isString() ? v.indexOf(value.asString()) : -1;
+				if (ch < 1 || ch > 16 || std::to_string(ch) != channel || index < 0)
+				{
+					error("E017", at(at(ptr, "channel"), channel), "keys must be channels 1-16 and values known states");
+					return;
+				}
+				v.channelValue[ch] = index;
+			}
+		}
+		else { v.source = inferred ? StateVar::Source::Inferred : StateVar::Source::Manual; }
+
+		if (const auto defaultValue = optionalString(def, "default", ptr))
+		{
+			v.defaultValue = v.indexOf(*defaultValue);
+			if (v.defaultValue < 0) { error("E017", at(ptr, "default"), "\"default\" must be one of the state names"); return; }
+		}
+		m_layout.m_state = std::move(v);
+	}
+
+	//! A note list that is either plain or keyed by state value: returns one list per state
+	//! (or a single list for plain), each entry a pitch or NoPitch for null
+	std::optional<std::vector<std::vector<std::uint8_t>>> stateNotes(const json::Value& v, const std::string& pointer)
+	{
+		const auto list = [&](const json::Value& arr, const std::string& ptr) -> std::optional<std::vector<std::uint8_t>> {
+			if (!arr.isArray() || arr.asArray().empty())
+			{
+				error("E019", ptr, "a row needs a non-empty list of notes");
+				return std::nullopt;
+			}
+			std::vector<std::uint8_t> out;
+			for (std::size_t i = 0; i < arr.asArray().size(); ++i)
+			{
+				const auto& n = arr.asArray()[i];
+				if (n.isNull()) { out.push_back(NoPitch); continue; }
+				if (n.isArray()) { error("E012", at(ptr, i), "chord buttons need a newer KeyFall version"); return std::nullopt; }
+				const auto p = note(n, at(ptr, i));
+				if (!p) { return std::nullopt; }
+				out.push_back(static_cast<std::uint8_t>(*p));
+			}
+			return out;
+		};
+		if (!v.isObject())
+		{
+			auto single = list(v, pointer);
+			if (!single) { return std::nullopt; }
+			return std::vector<std::vector<std::uint8_t>>{std::move(*single)};
+		}
+		if (!m_layout.m_state)
+		{
+			error("E016", pointer, "notes keyed by state need a \"states\" declaration at the top level");
+			return std::nullopt;
+		}
+		const auto& state = *m_layout.m_state;
+		std::vector<std::vector<std::uint8_t>> perState(state.values.size());
+		for (const auto& [value, arr] : v.asObject())
+		{
+			const int index = state.indexOf(value);
+			if (index < 0)
+			{
+				error("E016", at(pointer, value), "unknown state \"" + value + "\" (declared: " + state.name + ")");
+				return std::nullopt;
+			}
+			auto notes = list(arr, at(pointer, value));
+			if (!notes) { return std::nullopt; }
+			perState[index] = std::move(*notes);
+		}
+		for (std::size_t s = 0; s < perState.size(); ++s)
+		{
+			if (perState[s].empty())
+			{
+				error("E016", pointer, "notes for state \"" + state.values[s] + "\" are missing");
+				return std::nullopt;
+			}
+			if (perState[s].size() != perState[0].size())
+			{
+				error("E019", pointer, "every state must list the same number of buttons");
+				return std::nullopt;
+			}
+		}
+		return perState;
+	}
+
+	void parseRowsZone(const json::Value& zone, std::size_t index, const std::string& pointer)
+	{
+		checkKeys(zone, {"type", "id", "label", "hand", "input", "position", "rows", "shape"}, pointer);
+		Shape shape = Shape::Circle;
+		if (const auto s = optionalString(zone, "shape", pointer))
+		{
+			if (*s == "rect") { shape = Shape::Rect; }
+			else if (*s == "roundRect") { shape = Shape::RoundRect; }
+			else if (*s != "circle") { error("E014", at(pointer, "shape"), "\"shape\" must be rect, roundRect or circle"); }
+		}
+		const auto* rows = zone.find("rows");
+		if (!rows || !rows->isArray() || rows->asArray().empty())
+		{
+			error("E019", at(pointer, "rows"), "a rows zone needs \"rows\": [{\"notes\": [...]}, ...]");
+			return;
+		}
+
+		struct Row
+		{
+			std::vector<std::vector<std::uint8_t>> notes; // [state][button]
+			float offset;
+		};
+		std::vector<Row> parsed;
+		for (std::size_t r = 0; r < rows->asArray().size(); ++r)
+		{
+			const auto& row = rows->asArray()[r];
+			const auto rowPtr = at(at(pointer, "rows"), r);
+			if (!row.isObject() || !row.find("notes"))
+			{
+				error("E019", rowPtr, "each row must be an object with \"notes\"");
+				return;
+			}
+			checkKeys(row, {"notes", "offset", "label"}, rowPtr);
+			auto notes = stateNotes(*row.find("notes"), at(rowPtr, "notes"));
+			if (!notes) { return; }
+			// Staggered by default: every second row shifted by half a button
+			float offset = (r % 2) ? 0.5f : 0.0f;
+			if (const auto* o = row.find("offset"))
+			{
+				if (!o->isNumber()) { error("E019", at(rowPtr, "offset"), "\"offset\" must be a number of buttons"); return; }
+				offset = static_cast<float>(o->asNumber());
+			}
+			parsed.push_back({std::move(*notes), offset});
+		}
+
+		const auto [ox, oy] = zoneOrigin(&zone, pointer);
+		const auto z = newZone(&zone, index, pointer);
+		if (!z) { return; }
+		const int defaultState = m_layout.m_state ? m_layout.m_state->defaultValue : 0;
+		for (std::size_t r = 0; r < parsed.size(); ++r)
+		{
+			const auto& row = parsed[r];
+			for (std::size_t b = 0; b < row.notes[0].size(); ++b)
+			{
+				Control ctl;
+				ctl.id = m_layout.m_zones[*z].id + ".r" + std::to_string(r) + "b" + std::to_string(b);
+				ctl.zone = *z;
+				ctl.shape = shape;
+				ctl.rect = {ox + (row.offset + b) * GridCellPitch, oy + r * ButtonRowPitch, GridCellSize, GridCellSize};
+				if (row.notes.size() > 1)
+				{
+					for (const auto& perState : row.notes) { ctl.statePitches.push_back(perState[b]); }
+					ctl.pitch = ctl.statePitches[defaultState];
+					if (ctl.pitch == NoPitch)
+					{
+						for (const auto p : ctl.statePitches) { if (p != NoPitch) { ctl.pitch = p; break; } }
+					}
+				}
+				else { ctl.pitch = row.notes[0][b]; }
+				if (ctl.pitch == NoPitch)
+				{
+					error("E019", at(at(pointer, "rows"), r), "button " + std::to_string(b) + " has no note in any state");
+					return;
+				}
+				m_layout.m_controls.push_back(std::move(ctl));
+			}
 		}
 	}
 
@@ -576,7 +824,16 @@ void KeyboardLayout::finalize()
 	for (auto& list : m_byPitch) { list.clear(); }
 	for (std::size_t i = 0; i < m_controls.size(); ++i)
 	{
-		m_byPitch[m_controls[i].pitch].push_back(static_cast<std::uint16_t>(i));
+		const auto& c = m_controls[i];
+		const auto add = [&](std::uint8_t p) {
+			auto& list = m_byPitch[p];
+			if (p != NoPitch && std::find(list.begin(), list.end(), static_cast<std::uint16_t>(i)) == list.end())
+			{
+				list.push_back(static_cast<std::uint16_t>(i));
+			}
+		};
+		add(c.pitch);
+		for (const auto p : c.statePitches) { if (p != NoPitch) { add(p); } }
 	}
 	if (m_controls.empty()) { m_bounds = {}; return; }
 	float left = std::numeric_limits<float>::max(), top = left;
@@ -606,10 +863,32 @@ std::optional<Rect> KeyboardLayout::lane(int pitch) const
 
 std::optional<std::uint16_t> KeyboardLayout::controlForInput(int channel, int pitch) const
 {
+	const auto r = resolve(channel, pitch, -1);
+	return r ? std::optional<std::uint16_t>(r->control) : std::nullopt;
+}
+
+std::optional<Resolved> KeyboardLayout::resolve(int channel, int pitch, int state) const
+{
+	const auto zoneAccepts = [&](std::uint16_t idx) {
+		const int zoneChannel = m_zones[m_controls[idx].zone].channel;
+		return zoneChannel == 0 || zoneChannel == channel;
+	};
+	const auto statesOf = [&](std::uint16_t idx) { return static_cast<int>(m_controls[idx].statePitches.size()); };
+	// Known state: the control that sounds this pitch in that state
 	for (const auto idx : candidates(pitch))
 	{
-		const int zoneChannel = m_zones[m_controls[idx].zone].channel;
-		if (zoneChannel == 0 || zoneChannel == channel) { return idx; }
+		if (!zoneAccepts(idx)) { continue; }
+		if (statesOf(idx) == 0) { return Resolved{idx, -1}; }
+		if (state >= 0 && m_controls[idx].pitchIn(state) == pitch) { return Resolved{idx, state}; }
+	}
+	// Unknown (or contradicting) state: any control and state that sound it
+	for (const auto idx : candidates(pitch))
+	{
+		if (!zoneAccepts(idx)) { continue; }
+		for (int s = 0; s < statesOf(idx); ++s)
+		{
+			if (m_controls[idx].pitchIn(s) == pitch) { return Resolved{idx, s}; }
+		}
 	}
 	return std::nullopt;
 }

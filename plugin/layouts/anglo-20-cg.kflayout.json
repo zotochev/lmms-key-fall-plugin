@@ -1,0 +1,121 @@
+{
+  "$schema": "../../docs/keyboard-layout-2.schema.json",
+  "format": 2,
+  "id": "anglo-20-cg",
+  "name": "Anglo concertina, 20 buttons, C/G",
+  "author": "KeyFall; button data from concertina-helper by Chuck McCallum",
+  "license": "MIT",
+  "description": "Bisonoric: every button sounds one note on the push and another on the pull. Button data transcribed from concertina-helper (https://github.com/mccalluc/concertina-helper, layouts/20_cg.yaml, MIT License, (c) 2023 Chuck McCallum). Rows are drawn as concertina-helper prints them. Most MIDI concertinas send the sounding pitch, so the bellows direction is inferred from the notes; for an instrument with a bellows sensor replace \"inferred\" with e.g. \"cc\": 11 and \"ranges\".",
+  "requires": [
+    "states",
+    "rows"
+  ],
+  "states": {
+    "bellows": {
+      "values": [
+        "push",
+        "pull"
+      ],
+      "inferred": true,
+      "default": "push"
+    }
+  },
+  "zones": [
+    {
+      "id": "L",
+      "label": "Left end",
+      "hand": "left",
+      "type": "rows",
+      "rows": [
+        {
+          "label": "C row",
+          "notes": {
+            "push": [
+              "C3",
+              "G3",
+              "C4",
+              "E4",
+              "G4"
+            ],
+            "pull": [
+              "G3",
+              "B3",
+              "D4",
+              "F4",
+              "A4"
+            ]
+          }
+        },
+        {
+          "label": "G row",
+          "notes": {
+            "push": [
+              "G3",
+              "D4",
+              "G4",
+              "B4",
+              "D5"
+            ],
+            "pull": [
+              "D4",
+              "F#4",
+              "A4",
+              "C5",
+              "E5"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "R",
+      "label": "Right end",
+      "hand": "right",
+      "type": "rows",
+      "position": [
+        7.5,
+        0
+      ],
+      "rows": [
+        {
+          "label": "C row",
+          "notes": {
+            "push": [
+              "C5",
+              "E5",
+              "G5",
+              "C6",
+              "E6"
+            ],
+            "pull": [
+              "B4",
+              "D5",
+              "F5",
+              "A5",
+              "B5"
+            ]
+          }
+        },
+        {
+          "label": "G row",
+          "notes": {
+            "push": [
+              "G5",
+              "B5",
+              "D6",
+              "G6",
+              "B6"
+            ],
+            "pull": [
+              "F#5",
+              "A5",
+              "C6",
+              "E6",
+              "F#6"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -298,8 +298,22 @@ QWidget* KeyFallView::createStatusBar()
 	m_lastEventLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 	m_lastEventLabel->setStyleSheet(QStringLiteral("QLabel { color: #8a8f98; }"));
 
+	m_bellowsButton = new QToolButton();
+	m_bellowsButton->setAutoRaise(true);
+	m_bellowsButton->setVisible(false);
+	connect(m_bellowsButton, &QToolButton::clicked, this, [this] {
+		// Only layouts with a manually chosen state let the user flip it here
+		const auto layout = m_plugin->currentLayout();
+		if (!layout || !layout->state()) { return; }
+		const int count = static_cast<int>(layout->state()->values.size());
+		m_resolver.setState((std::max(0, m_resolver.state()) + 1) % count);
+		updateBellows();
+	});
+
 	layout->addWidget(m_hudLabel);
 	layout->addStretch(1);
+	layout->addWidget(m_bellowsButton);
+	layout->addSpacing(8);
 	layout->addWidget(m_lastEventLabel);
 	bar->setFixedHeight(bar->fontMetrics().height() + 6);
 	return bar;
@@ -411,6 +425,17 @@ void KeyFallView::onLayoutChanged()
 {
 	m_resolver.setLayout(m_plugin->currentLayout().get());
 	m_keyboard->setInstrumentLayout(m_plugin->currentLayout());
+	if (const auto& state = m_plugin->currentLayout()->state())
+	{
+		using Source = kf::layout::StateVar::Source;
+		m_bellowsButton->setEnabled(state->source == Source::Manual);
+		m_bellowsButton->setToolTip(state->source == Source::Manual ? tr("Click to switch: this instrument does not report it")
+			: state->source == Source::Inferred ? tr("Worked out from the notes you play")
+			: state->source == Source::Cc ? tr("From controller %1 of your instrument").arg(state->cc)
+			: tr("From the MIDI channel of each note"));
+	}
+	m_bellowsButton->setVisible(m_plugin->currentLayout()->state().has_value());
+	updateBellows();
 	m_fall->clearPresses(); // ghost bars refer to controls of the old layout
 	m_expected.clear();
 	const int index = m_layoutCombo->findData(m_plugin->currentLayoutId());
@@ -541,6 +566,7 @@ void KeyFallView::pollInput()
 		}
 		showLastEvent(event, !press || press->control.has_value());
 	}
+	if (!m_inputBuffer.empty()) { updateBellows(); }
 }
 
 void KeyFallView::updateTransport()
@@ -697,18 +723,29 @@ void KeyFallView::startRun(double tick, const TransportSample& s)
 	}
 	const double ticksPerBeat = static_cast<double>(s.ticksPerBar) / s.beatsPerBar;
 	m_runIsWait = m_practiceActive && m_waitCheck->isChecked();
+
+	// Notes the selected instrument cannot play are not part of the run (PLAN.md §3a, coverage)
+	std::vector<bool> playable;
+	if (const auto layout = m_plugin->currentLayout())
+	{
+		const auto& notes = m_plugin->chart()->notes();
+		playable.reserve(notes.size());
+		for (const auto& n : notes) { playable.push_back(layout->covers(n.key)); }
+		if (std::all_of(playable.begin(), playable.end(), [](bool b) { return b; })) { playable.clear(); }
+	}
+	const std::vector<bool>* active = playable.empty() ? nullptr : &playable;
 	if (m_runIsWait)
 	{
 		const auto loop = practiceLoop();
 		m_wait.setChart(m_plugin->chart(), kf::Scorer::ChordMs / 1000.0 * m_ticksPerSecond);
 		m_wait.setAnyNoteCompletes(m_anyNoteCheck->isChecked());
-		m_wait.reset(tick, loop ? loop->end : 1e300);
+		m_wait.reset(tick, loop ? loop->end : 1e300, active);
 		m_fall->setGrades(&m_wait.grades());
 	}
 	else
 	{
 		// Windows follow the practice tempo: at half speed a beat is twice as long
-		m_scorer.start(tick, m_ticksPerSecond, ticksPerBeat);
+		m_scorer.start(tick, m_ticksPerSecond, ticksPerBeat, active);
 		m_fall->setGrades(&m_scorer.grades());
 	}
 	m_runActive = true;
@@ -811,6 +848,7 @@ void KeyFallView::scheduleAutoplay(double tick)
 	{
 		const auto& n = notes[m_autoplayNext++];
 		if (chance(m_rng) < AutoplayMissRate) { continue; }
+		if (const auto layout = m_plugin->currentLayout(); layout && !layout->covers(n.key)) { continue; }
 		int key = n.key;
 		if (chance(m_rng) < AutoplayWrongRate) { key += chance(m_rng) < 0.5 ? -2 : 2; }
 		const auto onNs = m_frameNs + static_cast<std::int64_t>((n.start - tick) / tps * 1e9 + jitter(m_rng) * 1e6 + offsetNs);
@@ -882,6 +920,20 @@ void KeyFallView::updateLoopRange()
 	}
 	m_loopFrom->setValue(firstBar);
 	m_loopTo->setValue(lastBar);
+}
+
+void KeyFallView::updateBellows()
+{
+	const auto layout = m_plugin->currentLayout();
+	if (!layout || !layout->state()) { return; }
+	const int s = m_resolver.state();
+	m_keyboard->setInstrumentState(s);
+	const auto& values = layout->state()->values;
+	const QString name = s >= 0 && s < static_cast<int>(values.size()) ? QString::fromStdString(values[s]) : tr("?");
+	// Arrows show the ends moving together (push) or apart (pull), not by colour alone
+	const QString arrows = name == QLatin1String("push") ? QStringLiteral("\u25b6\u25c0 ")
+		: name == QLatin1String("pull") ? QStringLiteral("\u25c0\u25b6 ") : QString();
+	m_bellowsButton->setText(tr("%1: %2%3").arg(QString::fromStdString(layout->state()->name), arrows, name));
 }
 
 void KeyFallView::practiseBar(int songBar)

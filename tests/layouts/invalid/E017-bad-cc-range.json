@@ -2,12 +2,12 @@
   "format": 2,
   "id": "x",
   "name": "X",
-  "piano": [
-    60,
-    72
-  ],
   "states": {
     "bellows": {
+      "values": [
+        "push",
+        "pull"
+      ],
       "cc": 11,
       "ranges": {
         "push": [
@@ -16,9 +16,13 @@
         ],
         "pull": [
           64,
-          127
+          200
         ]
       }
     }
-  }
+  },
+  "piano": [
+    60,
+    72
+  ]
 }

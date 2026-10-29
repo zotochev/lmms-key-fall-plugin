@@ -1,0 +1,88 @@
+{
+  "format": 2,
+  "id": "t-bisonoric",
+  "name": "Bisonoric rows, bellows on CC 11",
+  "requires": [
+    "states",
+    "rows"
+  ],
+  "states": {
+    "bellows": {
+      "values": [
+        "push",
+        "pull"
+      ],
+      "cc": 11,
+      "ranges": {
+        "push": [
+          0,
+          63
+        ],
+        "pull": [
+          64,
+          127
+        ]
+      }
+    }
+  },
+  "zones": [
+    {
+      "id": "L",
+      "hand": "left",
+      "type": "rows",
+      "rows": [
+        {
+          "notes": {
+            "push": [
+              "C3",
+              "G3",
+              "C4"
+            ],
+            "pull": [
+              "G3",
+              "B3",
+              "D4"
+            ]
+          }
+        },
+        {
+          "notes": {
+            "push": [
+              "G3",
+              "D4",
+              null
+            ],
+            "pull": [
+              "D4",
+              "F#4",
+              "A4"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "R",
+      "hand": "right",
+      "type": "rows",
+      "position": [
+        5,
+        0
+      ],
+      "rows": [
+        {
+          "notes": {
+            "push": [
+              "C5",
+              "E5"
+            ],
+            "pull": [
+              "B4",
+              "D5"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

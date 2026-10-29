@@ -112,6 +112,7 @@ private:
 	void updateLoopRange();
 	void playClick(bool downbeat);
 	void practiseBar(int songBar);
+	void updateBellows();
 
 	KeyFall* m_plugin;
 	QComboBox* m_clipCombo;
@@ -120,6 +121,7 @@ private:
 	MidiPortMenu* m_midiInMenu;
 	QLabel* m_lastEventLabel;
 	QLabel* m_hudLabel;
+	QToolButton* m_bellowsButton = nullptr;
 	FallCanvas* m_fall;
 	KeyboardWidget* m_keyboard;
 

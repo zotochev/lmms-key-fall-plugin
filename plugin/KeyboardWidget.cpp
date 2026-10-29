@@ -43,6 +43,7 @@ const QColor BlackKey{0x2a, 0x2f, 0x35};
 const QColor KeyBorder{0x8a, 0x8f, 0x98};
 const QColor PadFill{0x3a, 0x40, 0x48};
 const QColor PadLabel{0xc0, 0xc4, 0xca};
+const QColor PadLabelOtherState{0x7a, 0x7f, 0x88};
 const QColor PressedNeutral{0x56, 0xb4, 0xe9};
 const QColor PressedCorrect{0x00, 0x9e, 0x73};
 const QColor PressedWrong{0xd5, 0x5e, 0x00};
@@ -84,6 +85,14 @@ void KeyboardWidget::setPressed(std::uint16_t control, std::uint8_t velocity, Fe
 void KeyboardWidget::releaseAll()
 {
 	std::fill(m_pressed.begin(), m_pressed.end(), 0);
+	update();
+}
+
+void KeyboardWidget::setInstrumentState(int state)
+{
+	if (state == m_state) { return; }
+	m_state = state;
+	m_cacheValid = false; // labels are part of the cached picture
 	update();
 }
 
@@ -171,7 +180,20 @@ void KeyboardWidget::paintControl(QPainter& p, const Control& control, bool pres
 			if (control.shape == Shape::Circle) { p.drawEllipse(r); }
 			else if (control.shape == Shape::RoundRect) { p.drawRoundedRect(r, radius, radius); }
 			else { p.drawRect(r); }
-			if (r.width() >= 2 * MinLabelWidth)
+			const int states = static_cast<int>(control.statePitches.size());
+			if (states > 1 && r.width() >= 2 * MinLabelWidth && r.height() >= 22)
+			{
+				// Bisonoric button: one line per state (push on top, pull below), the current one brighter
+				for (int s = 0; s < states; ++s)
+				{
+					const QRectF line(r.left(), r.top() + r.height() * (0.15 + 0.7 * s / states), r.width(), r.height() * 0.7 / states);
+					const int pitch = control.pitchIn(s);
+					p.setPen(pressed ? Background : s == m_state ? PadLabel : PadLabelOtherState);
+					p.drawText(line, Qt::AlignCenter,
+						pitch < 0 ? QStringLiteral("\u2013") : QString::fromStdString(kf::layout::noteName(pitch)));
+				}
+			}
+			else if (r.width() >= 2 * MinLabelWidth)
 			{
 				p.setPen(pressed ? Background : PadLabel);
 				p.drawText(r, Qt::AlignCenter, QString::fromStdString(kf::layout::noteName(control.pitch)));

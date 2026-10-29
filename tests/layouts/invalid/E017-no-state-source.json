@@ -1,0 +1,17 @@
+{
+  "format": 2,
+  "id": "x",
+  "name": "X",
+  "states": {
+    "bellows": {
+      "values": [
+        "push",
+        "pull"
+      ]
+    }
+  },
+  "piano": [
+    60,
+    72
+  ]
+}

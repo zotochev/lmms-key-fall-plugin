@@ -41,6 +41,8 @@
 namespace kf::layout {
 
 constexpr int NumPitches = 128;
+//! A control that is silent in one instrument state (e.g. an air button, or a button without a pull note)
+constexpr std::uint8_t NoPitch = 255;
 constexpr int CurrentFormat = 2;
 constexpr std::size_t MaxControls = 1024;
 
@@ -75,7 +77,51 @@ struct Control
 	std::uint16_t zone = 0;
 	Shape shape = Shape::Rect;
 	Rect rect;
-	std::uint8_t pitch = 0; //!< sounding pitch (state-dependent pitches arrive with format features in v2)
+	std::uint8_t pitch = 0; //!< sounding pitch; for state-dependent controls: the pitch in the default state
+	//! One pitch per state value (e.g. push, pull) for bisonoric instruments; empty when the control
+	//! always sounds `pitch`. NoPitch where it is silent in that state.
+	std::vector<std::uint8_t> statePitches;
+
+	//! Pitch in `state` (-1 = unknown state: the default pitch); -1 when silent in that state
+	int pitchIn(int state) const
+	{
+		if (statePitches.empty() || state < 0 || state >= static_cast<int>(statePitches.size())) { return pitch; }
+		return statePitches[state] == NoPitch ? -1 : statePitches[state];
+	}
+};
+
+//! An instrument state that changes which pitch a control sounds, e.g. the bellows
+//! direction of an Anglo concertina (push / pull). The file declares how to detect it.
+struct StateVar
+{
+	enum class Source : std::uint8_t
+	{
+		Cc,       //!< a controller value range per state (bellows sensor)
+		Channel,  //!< a MIDI channel per state
+		Inferred, //!< from the received pitch: the instrument resolved the direction itself
+		Manual    //!< chosen in the KeyFall window
+	};
+	std::string name;
+	std::vector<std::string> values;
+	Source source = Source::Inferred;
+	int cc = -1;
+	std::vector<std::pair<int, int>> ccRanges; //!< per value: [low, high] controller value
+	std::array<int, 17> channelValue;           //!< MIDI channel 1..16 -> value index, -1 = none
+	int defaultValue = 0;
+
+	StateVar() { channelValue.fill(-1); }
+	int indexOf(std::string_view value) const
+	{
+		for (std::size_t i = 0; i < values.size(); ++i) { if (values[i] == value) { return static_cast<int>(i); } }
+		return -1;
+	}
+};
+
+//! A received note mapped onto the layout
+struct Resolved
+{
+	std::uint16_t control;
+	int state; //!< state the control sounded that pitch in, -1 for stateless layouts
 };
 
 struct Zone
@@ -136,6 +182,12 @@ public:
 
 	//! Control a received note maps to, honouring zone channel filters (channel is 1..16)
 	std::optional<std::uint16_t> controlForInput(int channel, int pitch) const;
+	//! Like controlForInput, but for a known state (-1 = unknown): prefers a control sounding
+	//! `pitch` in that state, otherwise any control and state that can sound it
+	std::optional<Resolved> resolve(int channel, int pitch, int state) const;
+
+	//! The instrument state variable, if the layout has one (format feature "states")
+	const std::optional<StateVar>& state() const { return m_state; }
 
 	Rect bounds() const { return m_bounds; }
 	//! Lowest and highest playable pitch; {0, -1} for an empty layout
@@ -146,6 +198,7 @@ private:
 	void finalize();
 
 	Meta m_meta;
+	std::optional<StateVar> m_state;
 	std::vector<Zone> m_zones;
 	std::vector<Control> m_controls;
 	std::array<std::vector<std::uint16_t>, NumPitches> m_byPitch;

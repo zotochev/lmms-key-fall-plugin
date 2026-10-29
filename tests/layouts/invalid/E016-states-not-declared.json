@@ -1,0 +1,22 @@
+{
+  "format": 2,
+  "id": "x",
+  "name": "X",
+  "zones": [
+    {
+      "type": "rows",
+      "rows": [
+        {
+          "notes": {
+            "push": [
+              60
+            ],
+            "pull": [
+              62
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

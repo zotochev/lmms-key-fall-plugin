@@ -26,7 +26,9 @@
 #define KEYFALL_CORE_INPUT_RESOLVER_H
 
 #include <cstdint>
+#include <map>
 #include <optional>
+#include <utility>
 
 namespace kf {
 
@@ -55,23 +57,33 @@ struct PressEvent
 	//! Control that produced it; empty when the note is outside the layout.
 	//! For format-2 piano layouts the control is simply the key of that pitch.
 	std::optional<std::uint16_t> control;
+	//! Instrument state (e.g. bellows push/pull index) the note was played in; -1 when unknown/stateless
+	int state = -1;
 };
 
 class InputResolver
 {
 public:
-	explicit InputResolver(const layout::KeyboardLayout* layout = nullptr)
-		: m_layout(layout)
-	{
-	}
+	explicit InputResolver(const layout::KeyboardLayout* layout = nullptr) { setLayout(layout); }
 
-	void setLayout(const layout::KeyboardLayout* layout) { m_layout = layout; }
+	void setLayout(const layout::KeyboardLayout* layout);
 
-	//! Note on/off become presses (note-on with velocity 0 is a release); other messages are ignored
-	std::optional<PressEvent> resolve(const MidiInputEvent& event) const;
+	//! Note on/off become presses (note-on with velocity 0 is a release). Controller messages
+	//! may change the instrument state (bellows sensor) and are otherwise ignored.
+	std::optional<PressEvent> resolve(const MidiInputEvent& event);
+
+	//! Current instrument state index (bellows direction), -1 when unknown or the layout has none.
+	//! For layouts that infer the state from the notes, the state of the last note played.
+	int state() const { return m_state; }
+	//! For layouts whose state is chosen by hand in the window
+	void setState(int state) { m_state = state; }
 
 private:
-	const layout::KeyboardLayout* m_layout;
+	const layout::KeyboardLayout* m_layout = nullptr;
+	int m_state = -1;
+	//! (channel, pitch) -> control and state it went down on, so the release lights off the
+	//! same button even if the bellows changed direction in between
+	std::map<std::pair<int, int>, std::pair<std::optional<std::uint16_t>, int>> m_held;
 };
 
 } // namespace kf

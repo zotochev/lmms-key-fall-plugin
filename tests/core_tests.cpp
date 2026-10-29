@@ -201,8 +201,10 @@ void testErrors()
 	CHECK(load(R"({"format":2,"id":"x","name":"X","zones":[{"type":"grid","rows":0,"cols":2,"startNote":1}]})").hasError("E009"));
 	CHECK(load(R"({"format":2,"id":"x","name":"X","zones":[{"type":"piano","firstNote":1,"lastNote":2,"input":{"channel":17}}]})").hasError("E010"));
 	CHECK(load(R"({"format":2,"id":"x","name":"X","zones":[{"id":"a","type":"piano","firstNote":1,"lastNote":2},{"id":"a","type":"piano","firstNote":3,"lastNote":4}]})").hasError("E011"));
-	CHECK(load(R"({"format":2,"id":"x","name":"X","piano":[60,72],"states":{}})").hasError("E012"));
-	CHECK(load(R"({"format":2,"id":"x","name":"X","piano":[60,72],"requires":["states"]})").hasError("E012"));
+	CHECK(load(R"({"format":2,"id":"x","name":"X","piano":[60,72],"states":{}})").hasError("E017"));
+	CHECK(load(R"({"format":2,"id":"x","name":"X","piano":[60,72],"states":{"a":{"values":["x","y"],"manual":true},"b":{"values":["x","y"],"manual":true}}})").hasError("E012"));
+	CHECK(load(R"({"format":2,"id":"x","name":"X","piano":[60,72],"requires":["layers"]})").hasError("E012"));
+	CHECK(load(R"({"format":2,"id":"x","name":"X","piano":[60,72],"requires":["states","rows"]})").layout.has_value());
 	CHECK(load(R"({"format":2,"id":"x","name":"X","zones":[{"type":"hex"}]})").hasError("E012"));
 	CHECK(load(R"({"format":2,"id":"x","name":"X","zones":[{"type":"grid","rows":1,"cols":1,"notes":[[60,64]]}]})").hasError("E012"));
 	CHECK(load(R"({"format":2,"id":"x","name":"X","zones":[{"type":"grid","rows":32,"cols":32,"startNote":0,"colStep":0,"rowStep":0},{"type":"grid","rows":1,"cols":1,"notes":[1]}]})").hasError("E013"));
@@ -216,7 +218,7 @@ void testErrors()
 void testInputResolver()
 {
 	const auto keys = KeyboardLayout::piano(48, 72, "k", "K");
-	const kf::InputResolver resolver(&keys);
+	kf::InputResolver resolver(&keys);
 
 	const auto on = resolver.resolve({100, 0x90, 1, 60, 90});
 	CHECK(on && on->on && on->velocity == 90 && on->pitch == 60 && on->timeNs == 100);
@@ -524,6 +526,74 @@ void testHands()
 	CHECK(gate.press(64) && gate.gateTick() == 48.0);
 }
 
+// Two ends of a tiny Anglo-style concertina: push/pull pitches per button
+const char* const BisonoricLayout = R"({"format":2,"id":"t","name":"T","requires":["states","rows"],
+	"states":{"bellows":{"values":["push","pull"],"inferred":true,"default":"push"}},
+	"zones":[
+	 {"id":"L","hand":"left","type":"rows","rows":[
+	   {"notes":{"push":["C3","G3","C4"],"pull":["G3","B3","D4"]}},
+	   {"notes":{"push":["G3","D4",null],"pull":["D4","F#4","A4"]}}]},
+	 {"id":"R","hand":"right","type":"rows","position":[5,0],"rows":[
+	   {"notes":{"push":["C5","E5"],"pull":["B4","D5"]}}]}]})";
+
+void testRowsAndStates()
+{
+	const auto l = load(BisonoricLayout);
+	CHECK(l.layout.has_value());
+	if (!l.layout) { return; }
+	const auto& k = *l.layout;
+	CHECK(k.state() && k.state()->values.size() == 2 && k.state()->source == StateVar::Source::Inferred);
+	CHECK(k.controls().size() == 8);
+	// Staggered: the second row is shifted by half a button and sits below the first
+	const auto& r0b0 = k.controls()[0];
+	const auto& r1b0 = k.controls()[3];
+	CHECK(r1b0.rect.x > r0b0.rect.x && r1b0.rect.x < r0b0.rect.right() && r1b0.rect.y > r0b0.rect.y);
+	CHECK(r0b0.shape == Shape::Circle);
+	// Pitch per state; the button without a push note sounds only on the pull
+	CHECK(r0b0.pitchIn(0) == 48 && r0b0.pitchIn(1) == 55);
+	CHECK(k.controls()[5].pitchIn(0) == -1 && k.controls()[5].pitchIn(1) == 69);
+	CHECK(k.controls()[5].pitch == 69);
+	// G3 is on several buttons and in both directions
+	CHECK(k.candidates(55).size() == 3);
+	const auto pushG3 = k.resolve(1, 55, 0);
+	const auto pullG3 = k.resolve(1, 55, 1);
+	CHECK(pushG3 && pullG3 && pushG3->control != pullG3->control && pushG3->state == 0 && pullG3->state == 1);
+	// Unknown direction: some control that can sound it, with the direction that does
+	const auto anyB3 = k.resolve(1, 59, -1);
+	CHECK(anyB3 && anyB3->state == 1 && k.controls()[anyB3->control].pitchIn(1) == 59);
+	// The right end is placed where the file says
+	CHECK(k.controls()[6].rect.x >= 5.0f);
+}
+
+void testBellowsInput()
+{
+	// Inferred: the pitch tells the direction; the release lights off the same button
+	const auto inferred = load(BisonoricLayout);
+	CHECK(inferred.layout.has_value());
+	if (!inferred.layout) { return; }
+	kf::InputResolver r(&*inferred.layout);
+	CHECK(r.state() == 0); // default: push
+	const auto b3 = r.resolve({0, 0x90, 1, 59, 80});
+	CHECK(b3 && b3->control && b3->state == 1 && r.state() == 1);
+	const auto b3off = r.resolve({1, 0x80, 1, 59, 0});
+	CHECK(b3off && b3off->control == b3->control);
+
+	// CC 11 bellows sensor: value ranges switch the direction
+	const auto cc = load(R"({"format":2,"id":"t","name":"T","states":{"bellows":{"values":["push","pull"],"cc":11,
+		"ranges":{"push":[0,63],"pull":[64,127]}}},"zones":[{"type":"rows","rows":[
+		{"notes":{"push":[60,64],"pull":[62,65]}}]}]})");
+	CHECK(cc.layout.has_value());
+	if (!cc.layout) { return; }
+	kf::InputResolver s(&*cc.layout);
+	CHECK(!s.resolve({0, 0xB0, 1, 11, 100}) && s.state() == 1); // pulling now
+	const auto d4 = s.resolve({1, 0x90, 1, 62, 90});
+	CHECK(d4 && d4->control == 0 && d4->state == 1);
+	CHECK(!s.resolve({2, 0xB0, 1, 11, 10}) && s.state() == 0); // bellows reversed while the key is held
+	const auto d4off = s.resolve({3, 0x80, 1, 62, 0});
+	CHECK(d4off && d4off->control == 0 && d4off->state == 1); // still the button that went down
+	CHECK(!s.resolve({4, 0xB0, 1, 7, 100}) && s.state() == 0); // other controllers are ignored
+}
+
 void testTempoCoach()
 {
 	kf::TempoCoach coach;
@@ -568,6 +638,8 @@ int main()
 		{"wait gate", testWaitGate},
 		{"hands", testHands},
 		{"tempo coach", testTempoCoach},
+		{"rows and states", testRowsAndStates},
+		{"bellows input", testBellowsInput},
 	};
 	for (const auto& [name, fn] : tests)
 	{

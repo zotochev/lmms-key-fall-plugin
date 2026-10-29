@@ -1,0 +1,25 @@
+{
+  "format": 2,
+  "id": "x",
+  "name": "X",
+  "piano": [
+    60,
+    72
+  ],
+  "states": {
+    "bellows": {
+      "values": [
+        "push",
+        "pull"
+      ],
+      "manual": true
+    },
+    "layer": {
+      "values": [
+        "a",
+        "b"
+      ],
+      "manual": true
+    }
+  }
+}

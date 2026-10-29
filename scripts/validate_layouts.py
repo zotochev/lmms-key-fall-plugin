@@ -20,6 +20,7 @@ CURRENT_FORMAT = 2
 NUM_PITCHES = 128
 MAX_CONTROLS = 1024
 MAX_GRID_SIDE = 32
+SUPPORTED_FEATURES = ("states", "rows")
 ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 NOTE_RE = re.compile(r"^([A-G])([#b]?)(-?\d{1,2})$")
 LETTER_PITCH = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
@@ -57,6 +58,8 @@ class Checker:
         self.failed = False
         self.controls = 0
         self.zone_ids = set()
+        self.state_values = None  # list of state names when the layout declares "states"
+        self.default_state = 0
 
     def error(self, code, pointer, message):
         self.failed = True
@@ -128,14 +131,16 @@ class Checker:
         self.check_keys(root, {"$schema", "format", "id", "name", "author", "license", "description", "match",
                                "units", "piano", "zones", "requires", "states"}, "")
         self.check_meta(root)
-        if "states" in root:
-            self.error("E012", "/states", "instrument states (e.g. bellows push/pull) need a newer KeyFall version")
         if "requires" in root:
             if not isinstance(root["requires"], list):
                 self.error("E014", "/requires", '"requires" must be an array of feature names')
             else:
                 for i, feature in enumerate(root["requires"]):
-                    self.error("E012", f"/requires/{i}", f'feature "{feature}" needs a newer KeyFall version')
+                    if feature not in SUPPORTED_FEATURES:
+                        name = feature if isinstance(feature, str) else "?"
+                        self.error("E012", f"/requires/{i}", f'feature "{name}" needs a newer KeyFall version')
+        if "states" in root:
+            self.check_states(root["states"])
 
         if "piano" in root and "zones" in root:
             self.error("E015", "", 'use either "piano" or "zones", not both')
@@ -148,6 +153,143 @@ class Checker:
             self.error("E005", "", 'the layout has no controls: add "piano" or a non-empty "zones" list')
         if self.controls > MAX_CONTROLS:
             self.error("E013", "", f"too many controls ({self.controls} > {MAX_CONTROLS})")
+
+    def check_states(self, states):
+        if not isinstance(states, dict) or not states:
+            self.error("E017", "/states", '"states" must be an object with one state, e.g. {"bellows": {...}}')
+            return
+        if len(states) > 1:
+            self.error("E012", "/states", "more than one state variable needs a newer KeyFall version")
+            return
+        name, d = next(iter(states.items()))
+        ptr = f"/states/{name}"
+        if not isinstance(d, dict):
+            self.error("E017", ptr, "a state must be an object")
+            return
+        self.check_keys(d, {"values", "cc", "ranges", "channel", "inferred", "manual", "default"}, ptr)
+        values = d.get("values")
+        if not isinstance(values, list) or len(values) < 2:
+            self.error("E017", f"{ptr}/values", '"values" must list at least two state names, e.g. ["push", "pull"]')
+            return
+        seen = []
+        for i, v in enumerate(values):
+            if not isinstance(v, str) or not v or v in seen:
+                self.error("E017", f"{ptr}/values/{i}", "state names must be unique, non-empty strings")
+                return
+            seen.append(v)
+        inferred = d.get("inferred") is True
+        manual = d.get("manual") is True
+        sources = ("cc" in d) + ("channel" in d) + inferred + manual
+        if sources != 1:
+            self.error("E017", ptr, 'a state needs exactly one source: "cc" (+ "ranges"), "channel", '
+                                    '"inferred": true or "manual": true')
+            return
+        if "cc" in d:
+            cc = d["cc"]
+            if not is_int(cc) or not 0 <= cc <= 127:
+                self.error("E017", f"{ptr}/cc", '"cc" must be a controller number 0-127')
+                return
+            ranges = d.get("ranges")
+            if not isinstance(ranges, dict):
+                self.error("E017", f"{ptr}/ranges", '"ranges" must map each state to [low, high], e.g. {"push": [0, 63]}')
+                return
+            for value, r in ranges.items():
+                ok = (value in seen and isinstance(r, list) and len(r) == 2 and all(is_int(x) for x in r)
+                      and r[0] >= 0 and r[1] <= 127 and r[0] <= r[1])
+                if not ok:
+                    self.error("E017", f"{ptr}/ranges/{value}", "each range must be a known state and [low, high] within 0-127")
+                    return
+        elif "channel" in d:
+            channels = d["channel"]
+            if not isinstance(channels, dict):
+                self.error("E017", f"{ptr}/channel", '"channel" must map MIDI channels to states, e.g. {"1": "push", "2": "pull"}')
+                return
+            for ch, value in channels.items():
+                if not (ch.isdigit() and str(int(ch)) == ch and 1 <= int(ch) <= 16 and value in seen):
+                    self.error("E017", f"{ptr}/channel/{ch}", "keys must be channels 1-16 and values known states")
+                    return
+        default = self.opt_string(d, "default", ptr)
+        if default is not None and default not in seen:
+            self.error("E017", f"{ptr}/default", '"default" must be one of the state names')
+            return
+        self.state_values = seen
+        self.default_state = seen.index(default) if default is not None else 0
+
+    def state_notes(self, v, pointer):
+        """Plain list or {state: list}; returns one list per state, or None on error."""
+        def check_list(arr, ptr):
+            if not isinstance(arr, list) or not arr:
+                self.error("E019", ptr, "a row needs a non-empty list of notes")
+                return None
+            pitches = []
+            for i, n in enumerate(arr):
+                if n is None:
+                    pitches.append(None)
+                    continue
+                if isinstance(n, list):
+                    self.error("E012", f"{ptr}/{i}", "chord buttons need a newer KeyFall version")
+                    return None
+                p = self.note(n, f"{ptr}/{i}")
+                if p is None:
+                    return None
+                pitches.append(p)
+            return pitches
+        if not isinstance(v, dict):
+            single = check_list(v, pointer)
+            return None if single is None else [single]
+        if self.state_values is None:
+            self.error("E016", pointer, 'notes keyed by state need a "states" declaration at the top level')
+            return None
+        per_state = [None] * len(self.state_values)
+        for value, arr in v.items():
+            if value not in self.state_values:
+                self.error("E016", f"{pointer}/{value}", f'unknown state "{value}"')
+                return None
+            notes = check_list(arr, f"{pointer}/{value}")
+            if notes is None:
+                return None
+            per_state[self.state_values.index(value)] = notes
+        for s_index, notes in enumerate(per_state):
+            if notes is None:
+                self.error("E016", pointer, f'notes for state "{self.state_values[s_index]}" are missing')
+                return None
+            if len(notes) != len(per_state[0]):
+                self.error("E019", pointer, "every state must list the same number of buttons")
+                return None
+        return per_state
+
+    def check_rows_zone(self, zone, index, pointer):
+        self.check_keys(zone, {"type", "id", "label", "hand", "input", "position", "rows", "shape"}, pointer)
+        shape = self.opt_string(zone, "shape", pointer)
+        if shape is not None and shape not in ("rect", "roundRect", "circle"):
+            self.error("E014", f"{pointer}/shape", '"shape" must be rect, roundRect or circle')
+        rows = zone.get("rows")
+        if not isinstance(rows, list) or not rows:
+            self.error("E019", f"{pointer}/rows", 'a rows zone needs "rows": [{"notes": [...]}, ...]')
+            return
+        parsed = []
+        for r, row in enumerate(rows):
+            row_ptr = f"{pointer}/rows/{r}"
+            if not isinstance(row, dict) or "notes" not in row:
+                self.error("E019", row_ptr, 'each row must be an object with "notes"')
+                return
+            self.check_keys(row, {"notes", "offset", "label"}, row_ptr)
+            notes = self.state_notes(row["notes"], f"{row_ptr}/notes")
+            if notes is None:
+                return
+            if "offset" in row and (not isinstance(row["offset"], (int, float)) or isinstance(row["offset"], bool)):
+                self.error("E019", f"{row_ptr}/offset", '"offset" must be a number of buttons')
+                return
+            parsed.append(notes)
+        self.check_position(zone, pointer)
+        if not self.new_zone(zone, index, pointer):
+            return
+        for r, notes in enumerate(parsed):
+            for b in range(len(notes[0])):
+                if all(per_state[b] is None for per_state in notes):
+                    self.error("E019", f"{pointer}/rows/{r}", f"button {b} has no note in any state")
+                    return
+                self.controls += 1
 
     def check_meta(self, root):
         fmt = root.get("format")
@@ -229,10 +371,12 @@ class Checker:
                 self.check_piano_zone(zone, i, pointer)
             elif ztype == "grid":
                 self.check_grid_zone(zone, i, pointer)
-            elif ztype in ("hex", "rows"):
+            elif ztype == "rows":
+                self.check_rows_zone(zone, i, pointer)
+            elif ztype == "hex":
                 self.error("E012", f"{pointer}/type", f'zone type "{ztype}" needs a newer KeyFall version')
             else:
-                self.error("E006", f"{pointer}/type", 'zone "type" must be "piano" or "grid"')
+                self.error("E006", f"{pointer}/type", 'zone "type" must be "piano", "grid" or "rows"')
 
     def check_piano_zone(self, zone, index, pointer):
         self.check_keys(zone, {"type", "id", "label", "hand", "input", "position", "firstNote", "lastNote"}, pointer)

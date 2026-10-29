@@ -1,0 +1,39 @@
+{
+  "format": 2,
+  "id": "t-uni-rows",
+  "name": "Plain rows + state by channel",
+  "states": {
+    "bellows": {
+      "values": [
+        "push",
+        "pull"
+      ],
+      "channel": {
+        "1": "push",
+        "2": "pull"
+      }
+    }
+  },
+  "zones": [
+    {
+      "type": "rows",
+      "shape": "roundRect",
+      "rows": [
+        {
+          "notes": [
+            60,
+            62,
+            64
+          ]
+        },
+        {
+          "notes": [
+            61,
+            63
+          ],
+          "offset": 0.5
+        }
+      ]
+    }
+  ]
+}
