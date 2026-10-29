@@ -101,6 +101,10 @@ struct ScoreSummary
 	//! Per song bar (index 0 = firstBar): fraction of hit notes, or -1 without judged notes
 	std::vector<double> barAccuracy;
 	int firstBar = 0;          //!< 1-based song bar number of barAccuracy[0]
+
+	//! Wait mode result: timing is not judged, completing chords cleanly is
+	bool waitMode = false;
+	int chords = 0, chordsCompleted = 0, cleanChords = 0, wrongPresses = 0;
 };
 
 class Scorer

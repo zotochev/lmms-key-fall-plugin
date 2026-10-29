@@ -25,6 +25,7 @@
 #include "KeyFallView.h"
 
 #include <QActionGroup>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QDir>
@@ -32,6 +33,8 @@
 #include <QLabel>
 #include <QMenu>
 #include <QResizeEvent>
+#include <QSignalBlocker>
+#include <QSpinBox>
 #include <QStandardItemModel>
 #include <QToolButton>
 #include <QUrl>
@@ -42,11 +45,15 @@
 #include <functional>
 #include <optional>
 
+#include "AudioEngine.h"
 #include "CalibrationDialog.h"
+#include "ConfigManager.h"
+#include "Engine.h"
 #include "FallCanvas.h"
 #include "KeyFall.h"
 #include "KeyboardWidget.h"
 #include "MidiPortMenu.h"
+#include "SamplePlayHandle.h"
 
 namespace lmms::gui {
 
@@ -59,6 +66,9 @@ constexpr double AutoplayJitterMs = 25;  // timing spread (standard deviation)
 constexpr double AutoplayWrongRate = 0.05;
 constexpr double AutoplayMissRate = 0.05;
 constexpr double AutoplayScheduleAheadSeconds = 0.5;
+constexpr double AutoplayWaitReactionSeconds = 0.25; // in wait mode the demo "finds" each chord this fast
+
+const auto ConfigSection = QStringLiteral("keyfall");
 
 std::int64_t nowNs()
 {
@@ -106,6 +116,7 @@ KeyFallView::KeyFallView(KeyFall* plugin)
 	mainLayout->setContentsMargins(0, 0, 0, 0);
 	mainLayout->setSpacing(0);
 	mainLayout->addWidget(createToolbar());
+	mainLayout->addWidget(createPracticeBar());
 	mainLayout->addWidget(createStatusBar());
 	mainLayout->addWidget(m_fall, 1);
 	mainLayout->addWidget(m_keyboard);
@@ -178,6 +189,79 @@ QWidget* KeyFallView::createToolbar()
 	layout->addWidget(m_midiInButton);
 	layout->addWidget(settingsButton);
 	return toolbar;
+}
+
+QWidget* KeyFallView::createPracticeBar()
+{
+	auto bar = new QWidget();
+	auto layout = new QHBoxLayout(bar);
+	layout->setContentsMargins(6, 0, 6, 2);
+	auto* config = ConfigManager::inst();
+	const auto flag = [config](const QString& key, bool fallback) {
+		return config->value(ConfigSection, key, fallback ? "1" : "0") == QLatin1String("1");
+	};
+
+	m_practiceButton = new QToolButton();
+	m_practiceButton->setCheckable(true);
+	m_practiceButton->setText(tr("▶ Practise"));
+	m_practiceButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+	m_practiceButton->setToolTip(tr("Play the clip on KeyFall's own clock: slower tempo, loop and wait mode.\n"
+		"LMMS stays stopped; your keyboard still sounds through its track."));
+	connect(m_practiceButton, &QToolButton::toggled, this, [this](bool on) { on ? startPractice() : stopPractice(); });
+
+	m_waitCheck = new QCheckBox(tr("Wait for me"));
+	m_waitCheck->setToolTip(tr("Time stops at each chord until you play all of its keys"));
+	m_waitCheck->setChecked(flag("wait", false));
+
+	m_tempoSpin = new QSpinBox();
+	m_tempoSpin->setRange(25, 100);
+	m_tempoSpin->setSingleStep(5);
+	m_tempoSpin->setSuffix(QStringLiteral(" %"));
+	m_tempoSpin->setPrefix(tr("Tempo "));
+	m_tempoSpin->setToolTip(tr("Practice tempo relative to the song"));
+	m_tempoSpin->setValue(config->value(ConfigSection, "practicetempo", "100").toInt());
+
+	m_loopCheck = new QCheckBox(tr("Loop bars"));
+	m_loopCheck->setToolTip(tr("Repeat a passage; each pass is scored on its own"));
+	m_loopFrom = new QSpinBox();
+	m_loopTo = new QSpinBox();
+	for (auto* spin : {m_loopFrom, m_loopTo}) { spin->setRange(1, 999); }
+
+	m_countInCheck = new QCheckBox(tr("Count-in"));
+	m_countInCheck->setToolTip(tr("One bar of clicks before the music starts"));
+	m_countInCheck->setChecked(flag("countin", true));
+	m_clickCheck = new QCheckBox(tr("Click"));
+	m_clickCheck->setToolTip(tr("Metronome click on every beat"));
+	m_clickCheck->setChecked(flag("click", false));
+
+	connect(m_waitCheck, &QCheckBox::toggled, this, [this](bool on) {
+		ConfigManager::inst()->setValue(ConfigSection, "wait", on ? "1" : "0");
+		m_restartPending = true; // a different kind of run
+	});
+	connect(m_tempoSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [](int value) {
+		ConfigManager::inst()->setValue(ConfigSection, "practicetempo", QString::number(value));
+	});
+	connect(m_countInCheck, &QCheckBox::toggled, this, [](bool on) {
+		ConfigManager::inst()->setValue(ConfigSection, "countin", on ? "1" : "0");
+	});
+	connect(m_clickCheck, &QCheckBox::toggled, this, [](bool on) {
+		ConfigManager::inst()->setValue(ConfigSection, "click", on ? "1" : "0");
+	});
+
+	layout->addWidget(m_practiceButton);
+	layout->addWidget(m_waitCheck);
+	layout->addSpacing(8);
+	layout->addWidget(m_tempoSpin);
+	layout->addSpacing(8);
+	layout->addWidget(m_loopCheck);
+	layout->addWidget(m_loopFrom);
+	layout->addWidget(new QLabel(QStringLiteral("–")));
+	layout->addWidget(m_loopTo);
+	layout->addSpacing(8);
+	layout->addWidget(m_countInCheck);
+	layout->addWidget(m_clickCheck);
+	layout->addStretch(1);
+	return bar;
 }
 
 QWidget* KeyFallView::createStatusBar()
@@ -324,6 +408,9 @@ void KeyFallView::onChartChanged()
 	m_fall->setSummary(std::nullopt);
 	updateHud();
 	m_fall->setChart(m_plugin->chart());
+	m_fall->setGrades(&m_scorer.grades());
+	if (m_practiceActive) { stopPractice(); }
+	updateLoopRange();
 	if (!m_plugin->currentClip()) { m_clipCombo->setCurrentIndex(0); }
 	m_lastShownTick = -1e300;
 	updateMessage();
@@ -407,7 +494,12 @@ void KeyFallView::pollInput()
 	{
 		const auto press = m_resolver.resolve(event);
 		auto feedback = KeyboardWidget::Feedback::Neutral;
-		if (press && press->on && m_runActive)
+		if (press && press->on && m_runActive && m_runIsWait)
+		{
+			feedback = m_wait.press(press->pitch) ? KeyboardWidget::Feedback::Correct : KeyboardWidget::Feedback::Wrong;
+			updateHud();
+		}
+		else if (press && press->on && m_runActive)
 		{
 			// Where the press lands on the chart: back-date it from this frame, minus the calibrated delay
 			const double tick = m_currentTick - (m_frameNs - press->timeNs) * 1e-9 * m_ticksPerSecond
@@ -439,19 +531,62 @@ void KeyFallView::updateTransport()
 		m_supportedMode = s.supportedMode;
 		updateMessage();
 	}
-
+	m_ticksPerBar = s.ticksPerBar;
+	m_beatsPerBar = s.beatsPerBar;
+	m_songTickOfChartZero = s.songTickOfChartZero;
+	const double ticksPerBeat = static_cast<double>(s.ticksPerBar) / s.beatsPerBar;
 	const std::int64_t now = nowNs();
-	double tick = m_clock.update(s.chartTick, now, s.ticksPerSecond, s.playing);
-	// The song position runs about one buffer ahead of what is audible
-	if (s.playing) { tick -= s.latencyTicks; }
 
-	// A loop wrap does not always arrive as a jump signal: going back in time ends the pass too
-	if (m_runActive && tick < m_currentTick - 0.25 * s.ticksPerSecond) { m_restartPending = true; }
+	// Pressing Play in LMMS always wins over practice
+	if (m_practiceActive && s.playing) { stopPractice(); }
+
+	double tick = 0;
+	double tps = s.ticksPerSecond;
+	bool playing = false;
+	if (m_practiceActive)
+	{
+		m_practice.setTempo(s.ticksPerSecond, m_tempoSpin->value() / 100.0);
+		const auto loop = practiceLoop();
+		m_practice.setLoop(loop);
+		const std::optional<double> gate = m_runActive && m_runIsWait ? m_wait.gateTick() : std::nullopt;
+		if (m_practice.update(now, gate)) { m_restartPending = true; } // next pass of the loop
+		tick = m_practice.position();
+		tps = m_practice.ticksPerSecond();
+		playing = true;
+
+		// Count-in clicks always, beat clicks when asked for; nothing while waiting at a chord
+		const auto beat = static_cast<long long>(std::floor((s.songTickOfChartZero + tick) / ticksPerBeat + 1e-6));
+		if (!m_clickArmed || beat != m_lastClickBeat)
+		{
+			const bool countIn = tick < 0;
+			if (m_clickArmed && ((countIn && m_countInCheck->isChecked()) || m_clickCheck->isChecked()))
+			{
+				playClick(((beat % m_beatsPerBar) + m_beatsPerBar) % m_beatsPerBar == 0);
+			}
+			m_lastClickBeat = beat;
+			m_clickArmed = true;
+		}
+		if (!loop && tick > m_plugin->chart()->length() + ticksPerBeat)
+		{
+			stopPractice(); // played to the end of the clip
+			playing = false;
+		}
+	}
+	else
+	{
+		tick = m_clock.update(s.chartTick, now, s.ticksPerSecond, s.playing);
+		// The song position runs about one buffer ahead of what is audible
+		if (s.playing) { tick -= s.latencyTicks; }
+		playing = s.playing;
+		// A loop wrap does not always arrive as a jump signal: going back in time ends the pass too
+		if (m_runActive && tick < m_currentTick - 0.25 * tps) { m_restartPending = true; }
+	}
 	m_currentTick = tick;
-	m_ticksPerSecond = s.ticksPerSecond;
+	m_ticksPerSecond = tps;
 	m_frameNs = now;
 
-	const bool scoring = s.playing && s.supportedMode && m_plugin->currentClip() && !m_plugin->chart()->empty();
+	const bool scoring = playing && (m_practiceActive || s.supportedMode) && m_plugin->currentClip()
+		&& !m_plugin->chart()->empty();
 	if (!scoring)
 	{
 		if (m_runActive) { finishRun(s); }
@@ -466,32 +601,52 @@ void KeyFallView::updateTransport()
 	if (m_runActive)
 	{
 		if (m_autoplay) { scheduleAutoplay(tick); }
-		m_scorer.setTempo(s.ticksPerSecond, static_cast<double>(s.ticksPerBar) / s.beatsPerBar);
-		if (!m_scorer.advance(tick).empty()) { updateHud(); }
-		if (m_scorer.finished() && tick > m_plugin->chart()->length())
+		if (m_runIsWait)
 		{
-			finishRun(s);
-			m_waitForRestart = true; // the song plays on past the clip: keep the result on screen
+			if (m_wait.finished())
+			{
+				finishRun(s);
+				m_waitForRestart = true;
+			}
+		}
+		else
+		{
+			m_scorer.setTempo(tps, ticksPerBeat);
+			if (!m_scorer.advance(tick).empty()) { updateHud(); }
+			if (m_scorer.finished() && tick > m_plugin->chart()->length())
+			{
+				finishRun(s);
+				m_waitForRestart = true; // the song plays on past the clip: keep the result on screen
+			}
 		}
 	}
 
-	if (tick != m_lastShownTick || s.playing)
+	if (tick != m_lastShownTick || playing)
 	{
 		m_lastShownTick = tick;
 		FallCanvas::Timeline t;
 		t.now = tick;
-		t.ticksPerSecond = s.ticksPerSecond;
+		t.ticksPerSecond = tps;
 		t.ticksPerBar = s.ticksPerBar;
 		t.beatsPerBar = s.beatsPerBar;
 		t.songTickOfChartZero = s.songTickOfChartZero;
-		t.playing = s.playing;
+		t.playing = playing;
 		m_fall->setTimeline(t);
 
 		// Keys whose notes are sounding at the hit line get the "play me" band
 		const auto* layout = m_keyboard->instrumentLayout();
 		const auto chart = m_plugin->chart();
 		std::vector<bool> expected(layout ? layout->controls().size() : 0, false);
-		if (layout)
+		if (layout && m_runActive && m_runIsWait)
+		{
+			// Wait mode: always show the chord that is being waited for
+			for (const auto i : m_wait.currentNotes())
+			{
+				const auto c = layout->candidates(chart->notes()[i].key);
+				if (!c.empty()) { expected[c.front()] = true; }
+			}
+		}
+		else if (layout)
 		{
 			const auto& notes = chart->notes();
 			for (std::size_t i = chart->firstVisible(tick); i < notes.size() && notes[i].start <= tick; ++i)
@@ -520,7 +675,21 @@ void KeyFallView::startRun(double tick, const TransportSample& s)
 		case KeyFall::Tolerance::Strict: m_scorer.setTolerance(kf::TolerancePreset::Strict); break;
 		default: m_scorer.setTolerance(kf::TolerancePreset::Normal); break;
 	}
-	m_scorer.start(tick, s.ticksPerSecond, static_cast<double>(s.ticksPerBar) / s.beatsPerBar);
+	const double ticksPerBeat = static_cast<double>(s.ticksPerBar) / s.beatsPerBar;
+	m_runIsWait = m_practiceActive && m_waitCheck->isChecked();
+	if (m_runIsWait)
+	{
+		const auto loop = practiceLoop();
+		m_wait.setChart(m_plugin->chart(), kf::Scorer::ChordMs / 1000.0 * m_ticksPerSecond);
+		m_wait.reset(tick, loop ? loop->end : 1e300);
+		m_fall->setGrades(&m_wait.grades());
+	}
+	else
+	{
+		// Windows follow the practice tempo: at half speed a beat is twice as long
+		m_scorer.start(tick, m_ticksPerSecond, ticksPerBeat);
+		m_fall->setGrades(&m_scorer.grades());
+	}
 	m_runActive = true;
 	m_recentDeltasMs.clear();
 	m_autoplayQueue.clear();
@@ -535,7 +704,21 @@ void KeyFallView::finishRun(const TransportSample& s)
 {
 	m_scorer.stop();
 	m_runActive = false;
-	const auto summary = m_scorer.summary(s.ticksPerBar, s.songTickOfChartZero);
+	kf::ScoreSummary summary;
+	if (m_runIsWait)
+	{
+		const auto w = m_wait.stats();
+		summary.waitMode = true;
+		summary.chords = summary.expected = w.chords;
+		summary.chordsCompleted = w.completed;
+		summary.cleanChords = w.clean;
+		summary.wrongPresses = w.wrongPresses;
+		summary.notesPercent = w.chords ? 100.0 * w.clean / w.chords : 0;
+		summary.stars = w.completed < w.chords ? 0 : summary.notesPercent >= 90 ? 3 : summary.notesPercent >= 70 ? 2 : 1;
+		// Nothing completed (e.g. stopped right away): keep the previous result
+		if (w.completed == 0) { summary.expected = 0; }
+	}
+	else { summary = m_scorer.summary(s.ticksPerBar, s.songTickOfChartZero); }
 	// A pass without a single judged note (e.g. stopped right away) leaves the last result in place
 	if (summary.expected > 0) { m_fall->setSummary(summary); }
 	updateHud();
@@ -546,6 +729,13 @@ void KeyFallView::updateHud()
 	if (!m_runActive)
 	{
 		m_hudLabel->clear();
+		return;
+	}
+	if (m_runIsWait)
+	{
+		const auto w = m_wait.stats();
+		m_hudLabel->setText(tr("Chord %1 / %2  \u00b7  %n wrong key(s)", nullptr, w.wrongPresses)
+			.arg(std::min(w.completed + 1, w.chords)).arg(w.chords));
 		return;
 	}
 	QString text = tr("%1%").arg(qRound(m_scorer.liveAccuracy()));
@@ -564,6 +754,21 @@ void KeyFallView::updateHud()
 void KeyFallView::scheduleAutoplay(double tick)
 {
 	const auto& notes = m_plugin->chart()->notes();
+	if (m_runIsWait)
+	{
+		const bool pending = std::any_of(m_autoplayQueue.begin(), m_autoplayQueue.end(), [](const AutoplayEvent& e) { return e.on; });
+		if (!m_practice.holding() || pending) { return; }
+		std::uniform_real_distribution<double> chance(0.0, 1.0);
+		const auto onNs = m_frameNs + static_cast<std::int64_t>(AutoplayWaitReactionSeconds * 1e9);
+		for (const auto i : m_wait.currentNotes())
+		{
+			int key = notes[i].key;
+			if (chance(m_rng) < AutoplayWrongRate) { key += 2; } // a wrong key first; the right one comes next time
+			m_autoplayQueue.push_back({onNs, static_cast<std::uint8_t>(std::clamp(key, 0, 127)), true});
+			m_autoplayQueue.push_back({onNs + 300'000'000, static_cast<std::uint8_t>(std::clamp(key, 0, 127)), false});
+		}
+		return;
+	}
 	const double tps = m_ticksPerSecond;
 	std::normal_distribution<double> jitter(0.0, AutoplayJitterMs);
 	std::uniform_real_distribution<double> chance(0.0, 1.0);
@@ -580,6 +785,74 @@ void KeyFallView::scheduleAutoplay(double tick)
 		m_autoplayQueue.push_back({onNs, static_cast<std::uint8_t>(std::clamp(key, 0, 127)), true});
 		m_autoplayQueue.push_back({offNs, static_cast<std::uint8_t>(std::clamp(key, 0, 127)), false});
 	}
+}
+
+void KeyFallView::startPractice()
+{
+	const TransportSample s = m_plugin->sampleTransport();
+	if (!m_plugin->currentClip() || m_plugin->chart()->empty() || s.playing)
+	{
+		// Nothing to practise, or LMMS is playing: undo the button press
+		const QSignalBlocker block(m_practiceButton);
+		m_practiceButton->setChecked(false);
+		return;
+	}
+	m_practice.setTempo(s.ticksPerSecond, m_tempoSpin->value() / 100.0);
+	const auto loop = practiceLoop();
+	m_practice.setLoop(loop);
+	double from = loop ? loop->begin : 0;
+	if (m_countInCheck->isChecked()) { from -= s.ticksPerBar; }
+	m_practice.start(from, nowNs());
+	m_practiceActive = true;
+	m_restartPending = true;
+	m_clickArmed = false;
+	m_autoplayQueue.clear();
+	m_practiceButton->setText(tr("■ Stop"));
+}
+
+void KeyFallView::stopPractice()
+{
+	m_practice.stop();
+	m_practiceActive = false;
+	const QSignalBlocker block(m_practiceButton);
+	m_practiceButton->setChecked(false);
+	m_practiceButton->setText(tr("▶ Practise"));
+	m_clock.reset();
+	m_keyboard->releaseAll();
+}
+
+std::optional<kf::PracticeClock::Loop> KeyFallView::practiceLoop() const
+{
+	if (!m_loopCheck->isChecked()) { return std::nullopt; }
+	// Spin boxes hold song bar numbers; the loop covers whole bars from..to
+	const double begin = (m_loopFrom->value() - 1.0) * m_ticksPerBar - m_songTickOfChartZero;
+	const double end = static_cast<double>(m_loopTo->value()) * m_ticksPerBar - m_songTickOfChartZero;
+	if (end <= begin) { return std::nullopt; }
+	return kf::PracticeClock::Loop{begin, end};
+}
+
+void KeyFallView::updateLoopRange()
+{
+	const TransportSample s = m_plugin->sampleTransport();
+	m_ticksPerBar = s.ticksPerBar;
+	m_songTickOfChartZero = s.songTickOfChartZero;
+	const int tpb = std::max(1, s.ticksPerBar);
+	const int firstBar = static_cast<int>(std::floor(s.songTickOfChartZero / tpb)) + 1;
+	const int lastBar = std::max(firstBar,
+		static_cast<int>(std::ceil((s.songTickOfChartZero + m_plugin->chart()->length()) / tpb)));
+	for (auto* spin : {m_loopFrom, m_loopTo})
+	{
+		const QSignalBlocker block(spin);
+		spin->setRange(firstBar, lastBar);
+	}
+	m_loopFrom->setValue(firstBar);
+	m_loopTo->setValue(lastBar);
+}
+
+void KeyFallView::playClick(bool downbeat)
+{
+	// The same samples and mechanism as LMMS's Tap Tempo tool
+	Engine::audioEngine()->addPlayHandle(new SamplePlayHandle(downbeat ? "misc/metronome02.ogg" : "misc/metronome01.ogg"));
 }
 
 void KeyFallView::openCalibration()

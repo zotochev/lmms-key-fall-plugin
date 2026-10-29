@@ -25,6 +25,11 @@ scripts\lmms.cmd test        :: core tests and layout checks (no LMMS needed)
 - While the song plays KeyFall judges every press. Afterwards it shows Notes %, Rhythm %, stars, timing feedback and a per-bar heat map.
 - **⚙ → Timing tolerance**: how strict the hit windows are (Loose / Normal / Strict).
 - **⚙ → Calibrate latency…**: tap along with the falling bars, and KeyFall subtracts the delay of your keyboard and screen.
+- **▶ Practise** (the panel under the toolbar): the clip plays on KeyFall's own clock while LMMS stays stopped. It offers:
+  - **Wait for me**: time stops at each chord until you play it;
+  - **Tempo %**;
+  - **Loop bars**;
+  - **Count-in** and **Click** (metronome).
 - **⚙ → Auto-play (demo)**: KeyFall plays the clip itself, with small mistakes. Use it as a demo and to check KeyFall without a MIDI keyboard.
 
 ## Instrument layouts

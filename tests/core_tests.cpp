@@ -31,6 +31,7 @@
 #include "Chart.h"
 #include "InputResolver.h"
 #include "PlayheadClock.h"
+#include "Practice.h"
 #include "Scorer.h"
 #include "Json.h"
 #include "KeyboardLayout.h"
@@ -433,6 +434,70 @@ void testCalibration()
 	CHECK(kf::calibrationOffsetMs({-20, -22, -18, -20}) == -20.0);
 }
 
+void testPracticeClock()
+{
+	constexpr std::int64_t Ms = 1000000;
+	kf::PracticeClock clock;
+	clock.setTempo(96, 0.5); // 120 bpm at 50 %: 48 ticks per second
+	clock.start(-192, 0);    // one bar of count-in before the music
+	clock.update(1000 * Ms);
+	CHECK(std::abs(clock.position() - (-144)) < 1e-6);
+	CHECK(clock.ticksPerSecond() == 48);
+
+	// Gate: time stops at the chord and does not jump when released
+	clock.update(5000 * Ms, 0.0);
+	CHECK(clock.position() == 0 && clock.holding());
+	clock.update(6000 * Ms, 0.0);
+	CHECK(clock.position() == 0);
+	clock.update(7000 * Ms); // released: continues from the gate, not from where time "would" be
+	CHECK(std::abs(clock.position() - 48) < 1e-6 && !clock.holding());
+
+	// Loop: wraps to the beginning and reports it
+	clock.setLoop(kf::PracticeClock::Loop{0, 96});
+	CHECK(!clock.update(7500 * Ms));
+	CHECK(clock.update(8100 * Ms));
+	CHECK(clock.position() == 0);
+
+	clock.stop();
+	CHECK(!clock.update(9000 * Ms) && clock.position() == 0);
+}
+
+void testWaitGate()
+{
+	// C major chord (rolled by 1 tick), then E4, then G4
+	const auto chart = chartOf({{0, 48, 60, 100}, {1, 48, 64, 100}, {0, 48, 67, 100}, {48, 48, 64, 100}, {96, 48, 67, 100}});
+	kf::WaitGate gate;
+	gate.setChart(chart, 2);
+	CHECK(gate.gateTick() == 0.0);
+	CHECK(gate.currentNotes().size() == 3);
+
+	CHECK(gate.press(60));
+	CHECK(!gate.press(62)); // wrong key: counted, chord stays
+	CHECK(gate.press(64));
+	CHECK(gate.gateTick() == 0.0);
+	CHECK(gate.press(67)); // chord complete
+	CHECK(gate.gateTick() == 48.0);
+	CHECK(gate.grades()[0] == kf::Grade::Ok); // completed, but a wrong key was used
+	CHECK(gate.press(64));
+	CHECK(gate.press(67));
+	CHECK(gate.finished() && !gate.gateTick());
+
+	const auto stats = gate.stats();
+	CHECK(stats.chords == 3 && stats.completed == 3 && stats.clean == 2 && stats.wrongPresses == 1);
+
+	// Loop from E4 up to (not including) G4; beginner mode: any key of the chord is enough
+	gate.setAnyNoteCompletes(true);
+	gate.reset(40, 96);
+	CHECK(gate.stats().chords == 1 && gate.gateTick() == 48.0);
+	CHECK(gate.grades()[0] == kf::Grade::Skipped && gate.grades()[4] == kf::Grade::Skipped);
+	CHECK(gate.press(64));
+	CHECK(gate.finished());
+
+	gate.reset(0);
+	CHECK(gate.press(67)); // any one note completes the chord in beginner mode
+	CHECK(gate.gateTick() == 48.0);
+}
+
 } // namespace
 
 int main()
@@ -457,6 +522,8 @@ int main()
 		{"scorer chords and skips", testScorerChordsAndSkips},
 		{"scorer bias", testScorerBias},
 		{"calibration", testCalibration},
+		{"practice clock", testPracticeClock},
+		{"wait gate", testWaitGate},
 	};
 	for (const auto& [name, fn] : tests)
 	{

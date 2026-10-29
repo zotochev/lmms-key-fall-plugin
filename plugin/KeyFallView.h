@@ -28,15 +28,19 @@
 #include <QPointer>
 #include <QTimer>
 #include <QVector>
+#include <optional>
 #include <random>
 #include <vector>
 
 #include "ToolPluginView.h"
 #include "core/InputResolver.h"
 #include "core/PlayheadClock.h"
+#include "core/Practice.h"
 #include "core/Scorer.h"
 
+class QCheckBox;
 class QComboBox;
+class QSpinBox;
 class QLabel;
 class QMenu;
 class QToolButton;
@@ -76,6 +80,7 @@ protected:
 private:
 	QWidget* createToolbar();
 	QWidget* createStatusBar();
+	QWidget* createPracticeBar();
 	QMenu* createSettingsMenu();
 	void updateKeyboardHeight();
 
@@ -99,6 +104,13 @@ private:
 	void openCalibration();
 	//! Demo / self-test: KeyFall plays the clip itself with human-like mistakes
 	void scheduleAutoplay(double tick);
+
+	// Practice: KeyFall's own clock (tempo %, loop, count-in, wait mode); LMMS stays stopped
+	void startPractice();
+	void stopPractice();
+	std::optional<kf::PracticeClock::Loop> practiceLoop() const;
+	void updateLoopRange();
+	void playClick(bool downbeat);
 
 	KeyFall* m_plugin;
 	QComboBox* m_clipCombo;
@@ -139,6 +151,25 @@ private:
 	std::size_t m_autoplayNext = 0; //!< next chart note to schedule
 	std::vector<AutoplayEvent> m_autoplayQueue;
 	std::mt19937 m_rng{12345};
+
+	kf::PracticeClock m_practice;
+	kf::WaitGate m_wait;
+	bool m_practiceActive = false;
+	bool m_runIsWait = false;
+	QToolButton* m_practiceButton = nullptr;
+	QCheckBox* m_waitCheck = nullptr;
+	QSpinBox* m_tempoSpin = nullptr;
+	QCheckBox* m_loopCheck = nullptr;
+	QSpinBox* m_loopFrom = nullptr;
+	QSpinBox* m_loopTo = nullptr;
+	QCheckBox* m_countInCheck = nullptr;
+	QCheckBox* m_clickCheck = nullptr;
+	long long m_lastClickBeat = 0;
+	bool m_clickArmed = false;
+	// Song geometry of the last frame (bar grid for loops, clicks and summaries)
+	int m_ticksPerBar = 192;
+	int m_beatsPerBar = 4;
+	double m_songTickOfChartZero = 0;
 };
 
 } // namespace lmms::gui

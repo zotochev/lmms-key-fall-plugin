@@ -275,7 +275,9 @@ void FallCanvas::paintSummary(QPainter& p) const
 {
 	const auto& s = *m_summary;
 	const double w = std::min(width() - 24.0, 560.0);
-	const QRectF card((width() - w) / 2, std::max(8.0, height() / 2.0 - 95), w, 190);
+	// Without a heat map (wait mode) the card is shorter
+	const double cardHeight = s.barAccuracy.empty() ? 140 : 190;
+	const QRectF card((width() - w) / 2, std::max(8.0, height() / 2.0 - cardHeight / 2), w, cardHeight);
 	p.setRenderHint(QPainter::Antialiasing, true);
 	p.setPen(QPen(BarLine, 1));
 	p.setBrush(CardBackground);
@@ -288,22 +290,31 @@ void FallCanvas::paintSummary(QPainter& p) const
 	p.setFont(f);
 	p.setPen(CardText);
 	const QString stars = QString(s.stars, QChar(0x2605)) + QString(3 - s.stars, QChar(0x2606));
-	p.drawText(inner, Qt::AlignHCenter | Qt::AlignTop,
-		tr("Notes %1%   Rhythm %2%   %3").arg(qRound(s.notesPercent)).arg(qRound(s.rhythmPercent)).arg(stars));
+	p.drawText(inner, Qt::AlignHCenter | Qt::AlignTop, s.waitMode
+		? tr("Chords %1 / %2   Clean %3%   %4").arg(s.chordsCompleted).arg(s.chords).arg(qRound(s.notesPercent)).arg(stars)
+		: tr("Notes %1%   Rhythm %2%   %3").arg(qRound(s.notesPercent)).arg(qRound(s.rhythmPercent)).arg(stars));
 
 	f.setPixelSize(12);
 	f.setBold(false);
 	p.setFont(f);
 	p.setPen(MessageText);
-	QString details = tr("Hit %1 of %2 notes · best streak %3").arg(s.hits).arg(s.expected).arg(s.bestStreak);
-	if (s.extras > 0) { details += tr(" · %n extra note(s)", nullptr, s.extras); }
+	QString details = s.waitMode
+		? tr("Wait mode · %n wrong key(s) on the way", nullptr, s.wrongPresses)
+		: tr("Hit %1 of %2 notes · best streak %3").arg(s.hits).arg(s.expected).arg(s.bestStreak);
+	if (!s.waitMode && s.extras > 0) { details += tr(" · %n extra note(s)", nullptr, s.extras); }
 	p.drawText(inner.adjusted(0, 30, 0, 0), Qt::AlignHCenter | Qt::AlignTop, details);
 
 	// Plain-language timing feedback (pedagogy review): consistent bias vs unsteady pulse
 	QString timing;
 	const int mean = qRound(std::abs(s.meanDeltaMs));
 	const int spread = qRound(s.stddevDeltaMs);
-	if (s.hits == 0 && s.extras == 0 && s.brushes == 0)
+	if (s.waitMode)
+	{
+		timing = s.chordsCompleted == s.chords
+			? tr("All chords found. Next step: play it with timing (switch Wait off), at a slower tempo if needed.")
+			: tr("Stopped before the end. Wait mode never rushes you: take your time to find each chord.");
+	}
+	else if (s.hits == 0 && s.extras == 0 && s.brushes == 0)
 	{
 		timing = tr("No key presses arrived. Check “MIDI in” above, or let KeyFall play: ⚙ → Auto-play (demo).");
 	}
@@ -344,7 +355,7 @@ void FallCanvas::paintSummary(QPainter& p) const
 	f.setPixelSize(11);
 	p.setFont(f);
 	p.setPen(MessageText);
-	p.drawText(inner, Qt::AlignHCenter | Qt::AlignBottom, tr("Press Play to try again"));
+	p.drawText(inner, Qt::AlignHCenter | Qt::AlignBottom, tr("Press Play (song) or Practise to try again"));
 }
 
 void FallCanvas::paintEvent(QPaintEvent*)
