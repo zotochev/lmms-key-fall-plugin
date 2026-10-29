@@ -128,7 +128,9 @@ Every state must have the same number of buttons in each row. `requires` lists t
 
 On the keyboard, bisonoric buttons have two labels: the push note on top and the pull note below. The note for the current bellows direction is brighter, and the status line shows `bellows: ▶◀ push` or `◀▶ pull`.
 
-The built-in **Anglo concertina, 20 buttons, C/G** (`anglo-20-cg`) is a complete example.
+The built-in Anglo concertinas **20 buttons C/G** (`anglo-20-cg`) and **30 buttons C/G Wheatstone** (`anglo-30-wheatstone-cg`) are complete examples.
+
+By default notes fall straight above their buttons. If the buttons stand in several rows, you can turn on **one lane per button** (⚙ → Falling notes → One lane per button, or Automatic). The lanes follow the order of the file: zone by zone, row by row, button by button. Under the hit line each lane carries the same label as its button.
 
 ### Example: keys plus pads
 

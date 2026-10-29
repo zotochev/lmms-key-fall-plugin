@@ -68,6 +68,12 @@ QColor heat(double accuracy)
 }
 
 constexpr double MinNoteHeight = 6.0; // px, so very short notes stay visible
+constexpr double LaneStripHeight = 28.0; // px of button labels under the hit line in lane mode
+constexpr double LaneZoneGap = 0.6;      // lanes of space between the ends of an instrument
+const QColor LaneLabelFill{0x3a, 0x40, 0x48};
+const QColor LaneLabelText{0xc0, 0xc4, 0xca};
+const QColor LaneLabelDim{0x7a, 0x7f, 0x88};
+const QColor LaneSeparator{0x26, 0x2a, 0x2f};
 constexpr double NoteGap = 3.0;       // px between a note's end and the next note on the same key
 
 std::int64_t nowNs()
@@ -109,6 +115,73 @@ void FallCanvas::setMessage(const QString& message)
 	if (message == m_message) { return; }
 	m_message = message;
 	update();
+}
+
+void FallCanvas::setLaneMode(LaneMode mode)
+{
+	m_laneMode = mode;
+	update();
+}
+
+double FallCanvas::hitY() const
+{
+	return m_laneMode == LaneMode::ButtonLanes ? height() - LaneStripHeight : height();
+}
+
+QRectF FallCanvas::laneRect(std::uint16_t control) const
+{
+	const auto* layout = m_keyboard->instrumentLayout();
+	if (m_laneMode == LaneMode::AboveInstrument || !layout || control >= layout->controls().size())
+	{
+		return m_keyboard->controlRect(control);
+	}
+	// Controls are stored zone by zone (left end, then right end), row by row: lanes keep that order
+	const auto& controls = layout->controls();
+	const double zoneGaps = controls.back().zone - controls.front().zone;
+	const double units = controls.size() + zoneGaps * LaneZoneGap;
+	const double unit = (width() - 8.0) / units;
+	const double before = control + (controls[control].zone - controls.front().zone) * LaneZoneGap;
+	return {4.0 + before * unit, 0.0, unit, static_cast<double>(height())};
+}
+
+void FallCanvas::paintLaneStrip(QPainter& p) const
+{
+	const auto* layout = m_keyboard->instrumentLayout();
+	if (!layout) { return; }
+	p.setRenderHint(QPainter::Antialiasing, true);
+	QFont f = font();
+	f.setPixelSize(9);
+	p.setFont(f);
+	const double top = hitY() + 2;
+	for (std::size_t i = 0; i < layout->controls().size(); ++i)
+	{
+		const auto& c = layout->controls()[i];
+		const QRectF lane = laneRect(static_cast<std::uint16_t>(i));
+		// Faint separators help the eye follow a lane down to its label
+		p.setPen(LaneSeparator);
+		p.drawLine(QPointF(lane.left(), 0), QPointF(lane.left(), hitY()));
+		const QRectF cell(lane.left() + 1, top, lane.width() - 2, LaneStripHeight - 3);
+		p.setPen(Qt::NoPen);
+		p.setBrush(LaneLabelFill);
+		p.drawRoundedRect(cell, 3, 3);
+		const int states = static_cast<int>(c.statePitches.size());
+		if (states > 1)
+		{
+			// Same as on the buttons: push note above, pull note below
+			for (int s = 0; s < states; ++s)
+			{
+				const int pitch = c.pitchIn(s);
+				p.setPen(s == 0 ? LaneLabelText : LaneLabelDim);
+				p.drawText(QRectF(cell.left(), cell.top() + cell.height() * s / states, cell.width(), cell.height() / states),
+					Qt::AlignCenter, pitch < 0 ? QStringLiteral("\u2013") : QString::fromStdString(kf::layout::noteName(pitch)));
+			}
+		}
+		else
+		{
+			p.setPen(LaneLabelText);
+			p.drawText(cell, Qt::AlignCenter, QString::fromStdString(kf::layout::noteName(c.pitch)));
+		}
+	}
 }
 
 void FallCanvas::setSummary(std::optional<kf::ScoreSummary> summary)
@@ -180,7 +253,7 @@ void FallCanvas::mousePressEvent(QMouseEvent* event)
 double FallCanvas::yForTick(double tick, double lookaheadTicks) const
 {
 	// Hit line at the bottom edge (right above the keyboard), the future above it
-	return height() - (tick - m_timeline.now) / lookaheadTicks * height();
+	return hitY() - (tick - m_timeline.now) / lookaheadTicks * hitY();
 }
 
 void FallCanvas::paintGrid(QPainter& p, double lookaheadTicks) const
@@ -224,7 +297,7 @@ void FallCanvas::paintNotes(QPainter& p, double lookaheadTicks) const
 		if (n.end() <= now) { continue; }
 		const auto candidates = layout->candidates(n.key);
 		if (candidates.empty()) { continue; } // counted in the status line
-		const QRectF lane = m_keyboard->controlRect(candidates.front());
+		const QRectF lane = laneRect(candidates.front());
 
 		double top = yForTick(n.end(), lookaheadTicks);
 		double bottom = yForTick(n.start, lookaheadTicks);
@@ -246,7 +319,7 @@ void FallCanvas::paintNotes(QPainter& p, double lookaheadTicks) const
 
 void FallCanvas::paintGhosts(QPainter& p, std::int64_t now) const
 {
-	const double pxPerSecond = height() / m_lookaheadSeconds;
+	const double pxPerSecond = hitY() / m_lookaheadSeconds;
 	QColor fill = GhostColor;
 	fill.setAlpha(70);
 	p.setRenderHint(QPainter::Antialiasing, true);
@@ -254,10 +327,10 @@ void FallCanvas::paintGhosts(QPainter& p, std::int64_t now) const
 	p.setBrush(fill);
 	for (const auto& g : m_ghosts)
 	{
-		const QRectF lane = m_keyboard->controlRect(g.control);
+		const QRectF lane = laneRect(g.control);
 		// The press grows upwards from the hit line while held, then floats away
-		const double top = height() - (now - g.startNs) * 1e-9 * pxPerSecond;
-		const double bottom = g.endNs ? height() - (now - g.endNs) * 1e-9 * pxPerSecond : height();
+		const double top = hitY() - (now - g.startNs) * 1e-9 * pxPerSecond;
+		const double bottom = g.endNs ? hitY() - (now - g.endNs) * 1e-9 * pxPerSecond : hitY();
 		if (bottom < 0) { continue; }
 		p.drawRoundedRect(QRectF(lane.left() + 3, top, std::max(2.0, lane.width() - 6), std::max(2.0, bottom - top)), 3, 3);
 	}
@@ -288,7 +361,8 @@ void FallCanvas::paintStatus(QPainter& p) const
 		for (const auto& n : m_chart->notes()) { outside += layout->covers(n.key) ? 0 : 1; }
 		if (outside > 0)
 		{
-			p.drawText(rect().adjusted(8, 0, -8, -6), Qt::AlignRight | Qt::AlignBottom,
+			// Above the hit line, clear of the button labels in lane mode
+			p.drawText(QRectF(8, 0, width() - 16, hitY() - 6), Qt::AlignRight | Qt::AlignBottom,
 				tr("%n note(s) of this clip are outside the selected layout", nullptr, outside));
 		}
 	}
@@ -408,7 +482,9 @@ void FallCanvas::paintEvent(QPaintEvent*)
 	paintGhosts(p, now);
 
 	p.setRenderHint(QPainter::Antialiasing, false);
-	p.fillRect(QRectF(0, height() - 2, width(), 2), HitLine);
+	if (m_laneMode == LaneMode::ButtonLanes) { paintLaneStrip(p); }
+	p.setRenderHint(QPainter::Antialiasing, false);
+	p.fillRect(QRectF(0, hitY() - 2, width(), 2), HitLine);
 	paintStatus(p);
 	if (m_summary && !m_timeline.playing) { paintSummary(p); }
 	else { m_barCells.clear(); }

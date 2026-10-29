@@ -56,7 +56,17 @@ public:
 		bool playing = false;
 	};
 
+	//! Where a note's column comes from
+	enum class LaneMode
+	{
+		AboveInstrument, //!< straight above its key / button (pianos, pads)
+		ButtonLanes      //!< one equal lane per button, labelled under the hit line (2D button layouts)
+	};
+
 	FallCanvas(KeyboardWidget* keyboard, QWidget* parent = nullptr);
+
+	void setLaneMode(LaneMode mode);
+	LaneMode laneMode() const { return m_laneMode; }
 
 	void setChart(std::shared_ptr<const kf::Chart> chart);
 	void setTimeline(const Timeline& timeline);
@@ -99,9 +109,15 @@ private:
 	void paintGhosts(QPainter& p, std::int64_t nowNs) const;
 	void paintStatus(QPainter& p) const;
 	void paintSummary(QPainter& p) const;
+	void paintLaneStrip(QPainter& p) const;
 	double yForTick(double tick, double lookaheadTicks) const;
+	//! Column of a control: above it on the instrument, or its own lane
+	QRectF laneRect(std::uint16_t control) const;
+	//! y of the hit line; in button-lane mode a label strip sits below it
+	double hitY() const;
 
 	KeyboardWidget* m_keyboard;
+	LaneMode m_laneMode = LaneMode::AboveInstrument;
 	std::shared_ptr<const kf::Chart> m_chart;
 	Timeline m_timeline;
 	double m_lookaheadSeconds = 3.0;

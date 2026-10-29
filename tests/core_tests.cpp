@@ -553,8 +553,11 @@ void testRowsAndStates()
 	CHECK(r0b0.pitchIn(0) == 48 && r0b0.pitchIn(1) == 55);
 	CHECK(k.controls()[5].pitchIn(0) == -1 && k.controls()[5].pitchIn(1) == 69);
 	CHECK(k.controls()[5].pitch == 69);
-	// G3 is on several buttons and in both directions
+	// G3 is on several buttons and in both directions; push (default) buttons come first,
+	// so the C3-G3 chord falls onto two different push buttons
 	CHECK(k.candidates(55).size() == 3);
+	CHECK(k.controls()[k.candidates(55).front()].pitchIn(0) == 55);
+	CHECK(k.candidates(55).front() != k.candidates(48).front());
 	const auto pushG3 = k.resolve(1, 55, 0);
 	const auto pullG3 = k.resolve(1, 55, 1);
 	CHECK(pushG3 && pullG3 && pushG3->control != pullG3->control && pushG3->state == 0 && pullG3->state == 1);

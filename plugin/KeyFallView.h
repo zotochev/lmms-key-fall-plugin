@@ -113,6 +113,7 @@ private:
 	void playClick(bool downbeat);
 	void practiseBar(int songBar);
 	void updateBellows();
+	void applyLaneMode();
 
 	KeyFall* m_plugin;
 	QComboBox* m_clipCombo;

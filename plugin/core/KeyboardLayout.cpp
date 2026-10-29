@@ -835,6 +835,17 @@ void KeyboardLayout::finalize()
 		add(c.pitch);
 		for (const auto p : c.statePitches) { if (p != NoPitch) { add(p); } }
 	}
+	// Bisonoric layouts: for each pitch, buttons that sound it in the default state (e.g. push)
+	// come first, so a chord played in one direction lands on buttons of that direction
+	if (m_state)
+	{
+		const int def = m_state->defaultValue;
+		for (int p = 0; p < NumPitches; ++p)
+		{
+			std::stable_partition(m_byPitch[p].begin(), m_byPitch[p].end(),
+				[&](std::uint16_t idx) { return m_controls[idx].pitchIn(def) == p; });
+		}
+	}
 	if (m_controls.empty()) { m_bounds = {}; return; }
 	float left = std::numeric_limits<float>::max(), top = left;
 	float right = std::numeric_limits<float>::lowest(), bottom = right;

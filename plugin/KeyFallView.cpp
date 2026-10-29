@@ -347,6 +347,30 @@ QMenu* KeyFallView::createSettingsMenu()
 		connect(action, &QAction::triggered, this, [this, value] { m_plugin->setTolerance(value); });
 	}
 
+	auto lanesMenu = menu->addMenu(tr("Falling notes"));
+	auto lanesGroup = new QActionGroup(lanesMenu);
+	const QString currentLanes = ConfigManager::inst()->value(ConfigSection, "lanes", "instrument");
+	const struct
+	{
+		const char* key;
+		QString text;
+	} laneOptions[] = {
+		{"auto", tr("Automatic: lanes for button instruments")},
+		{"instrument", tr("Above the keys / buttons")},
+		{"buttons", tr("One lane per button")},
+	};
+	for (const auto& option : laneOptions)
+	{
+		auto action = lanesMenu->addAction(option.text);
+		action->setCheckable(true);
+		action->setChecked(currentLanes == QLatin1String(option.key));
+		lanesGroup->addAction(action);
+		const QString key = QString::fromLatin1(option.key);
+		connect(action, &QAction::triggered, this, [this, key] {
+			ConfigManager::inst()->setValue(ConfigSection, "lanes", key);
+			applyLaneMode();
+		});
+	}
 	menu->addAction(tr("Calibrate latency…"), this, &KeyFallView::openCalibration);
 	auto autoplay = menu->addAction(tr("Auto-play (demo)"));
 	autoplay->setCheckable(true);
@@ -436,6 +460,7 @@ void KeyFallView::onLayoutChanged()
 	}
 	m_bellowsButton->setVisible(m_plugin->currentLayout()->state().has_value());
 	updateBellows();
+	applyLaneMode();
 	m_fall->clearPresses(); // ghost bars refer to controls of the old layout
 	m_expected.clear();
 	const int index = m_layoutCombo->findData(m_plugin->currentLayoutId());
@@ -920,6 +945,24 @@ void KeyFallView::updateLoopRange()
 	}
 	m_loopFrom->setValue(firstBar);
 	m_loopTo->setValue(lastBar);
+}
+
+void KeyFallView::applyLaneMode()
+{
+	const QString setting = ConfigManager::inst()->value(ConfigSection, "lanes", "instrument");
+	bool lanes = setting == QLatin1String("buttons");
+	if (setting == QLatin1String("auto"))
+	{
+		// Columns straight above the controls only work when they form one row, like piano keys
+		using kf::layout::Shape;
+		const auto layout = m_plugin->currentLayout();
+		lanes = layout && std::any_of(layout->controls().begin(), layout->controls().end(), [](const auto& c) {
+			return c.shape != Shape::PianoWhite && c.shape != Shape::PianoBlack;
+		}) && std::any_of(layout->controls().begin(), layout->controls().end(), [&](const auto& c) {
+			return c.rect.y != layout->controls().front().rect.y;
+		});
+	}
+	m_fall->setLaneMode(lanes ? FallCanvas::LaneMode::ButtonLanes : FallCanvas::LaneMode::AboveInstrument);
 }
 
 void KeyFallView::updateBellows()

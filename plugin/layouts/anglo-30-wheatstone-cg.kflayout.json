@@ -1,0 +1,159 @@
+{
+  "$schema": "../../docs/keyboard-layout-2.schema.json",
+  "format": 2,
+  "id": "anglo-30-wheatstone-cg",
+  "name": "Anglo concertina, 30 buttons, C/G (Wheatstone)",
+  "author": "KeyFall; button data from concertina-helper by Chuck McCallum",
+  "license": "MIT",
+  "description": "Bisonoric Wheatstone-system C/G Anglo with an accidental row. Button data transcribed from concertina-helper (https://github.com/mccalluc/concertina-helper, layouts/30_wheatstone_cg.yaml, MIT License, (c) 2023 Chuck McCallum); it matches the layouts published by anglo-tab and anglo-piano. Bellows direction is inferred from the notes.",
+  "requires": [
+    "states",
+    "rows"
+  ],
+  "states": {
+    "bellows": {
+      "values": [
+        "push",
+        "pull"
+      ],
+      "inferred": true,
+      "default": "push"
+    }
+  },
+  "zones": [
+    {
+      "id": "L",
+      "label": "Left end",
+      "hand": "left",
+      "type": "rows",
+      "rows": [
+        {
+          "label": "accidental row",
+          "notes": {
+            "push": [
+              "E3",
+              "A3",
+              "C#4",
+              "A4",
+              "G#4"
+            ],
+            "pull": [
+              "F3",
+              "Bb3",
+              "D#4",
+              "G4",
+              "Bb4"
+            ]
+          }
+        },
+        {
+          "label": "C row",
+          "notes": {
+            "push": [
+              "C3",
+              "G3",
+              "C4",
+              "E4",
+              "G4"
+            ],
+            "pull": [
+              "G3",
+              "B3",
+              "D4",
+              "F4",
+              "A4"
+            ]
+          }
+        },
+        {
+          "label": "G row",
+          "notes": {
+            "push": [
+              "B3",
+              "D4",
+              "G4",
+              "B4",
+              "D5"
+            ],
+            "pull": [
+              "A3",
+              "F#4",
+              "A4",
+              "C5",
+              "E5"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "R",
+      "label": "Right end",
+      "hand": "right",
+      "type": "rows",
+      "position": [
+        7.5,
+        0
+      ],
+      "rows": [
+        {
+          "label": "accidental row",
+          "notes": {
+            "push": [
+              "C#5",
+              "A5",
+              "G#5",
+              "C#6",
+              "A6"
+            ],
+            "pull": [
+              "D#5",
+              "G5",
+              "Bb5",
+              "D#6",
+              "F6"
+            ]
+          }
+        },
+        {
+          "label": "C row",
+          "notes": {
+            "push": [
+              "C5",
+              "E5",
+              "G5",
+              "C6",
+              "E6"
+            ],
+            "pull": [
+              "B4",
+              "D5",
+              "F5",
+              "A5",
+              "B5"
+            ]
+          }
+        },
+        {
+          "label": "G row",
+          "notes": {
+            "push": [
+              "G5",
+              "B5",
+              "D6",
+              "G6",
+              "B6"
+            ],
+            "pull": [
+              "F#5",
+              "A5",
+              "C6",
+              "E6",
+              "F#6"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
