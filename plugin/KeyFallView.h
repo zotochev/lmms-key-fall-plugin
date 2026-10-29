@@ -45,10 +45,10 @@ class QLabel;
 class QMenu;
 class QToolButton;
 class QWidget;
+class Pattern; // LMMS 1.2 classes live in the global namespace
 
 namespace lmms {
 class KeyFall;
-class MidiClip;
 struct TransportSample;
 }
 
@@ -129,7 +129,7 @@ private:
 	kf::InputResolver m_resolver;
 	std::vector<kf::MidiInputEvent> m_inputBuffer;
 	kf::PlayheadClock m_clock;
-	QVector<QPointer<MidiClip>> m_clipItems; //!< clip per combo row (row 0 = "choose a clip")
+	QVector<QPointer<Pattern>> m_clipItems; //!< clip per combo row (row 0 = "choose a clip")
 	QString m_midiProblem;                   //!< empty when a MIDI input is selected
 	bool m_supportedMode = true;
 	double m_lastShownTick = -1e300;

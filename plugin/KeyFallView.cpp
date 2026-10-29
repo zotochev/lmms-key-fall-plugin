@@ -45,7 +45,7 @@
 #include <functional>
 #include <optional>
 
-#include "AudioEngine.h"
+#include "Mixer.h"
 #include "CalibrationDialog.h"
 #include "ConfigManager.h"
 #include "Engine.h"
@@ -981,7 +981,7 @@ void KeyFallView::practiseBar(int songBar)
 void KeyFallView::playClick(bool downbeat)
 {
 	// The same samples and mechanism as LMMS's Tap Tempo tool
-	Engine::audioEngine()->addPlayHandle(new SamplePlayHandle(downbeat ? "misc/metronome02.ogg" : "misc/metronome01.ogg"));
+	Engine::mixer()->addPlayHandle(new SamplePlayHandle(downbeat ? "misc/metronome02.ogg" : "misc/metronome01.ogg"));
 }
 
 void KeyFallView::openCalibration()

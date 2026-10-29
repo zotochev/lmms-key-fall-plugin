@@ -29,7 +29,7 @@
 
 #include <QTimer>
 
-#include "AudioEngine.h"
+#include "Mixer.h"
 #include "ConfigManager.h"
 #include "Engine.h"
 #include "InstrumentTrack.h"
@@ -39,15 +39,25 @@
 #include "NotePlayHandle.h"
 #include "Song.h"
 #include "embed.h"
-#include "plugin_export.h"
+#include "export.h"
+
+// LMMS 1.2 asks each plug-in for its pixmaps (PluginPixmapLoader); KeyFall keeps them in its Qt resources
+namespace PLUGIN_NAME {
+QPixmap getIconPixmap(const char* name, int width, int height)
+{
+	QPixmap pixmap(QStringLiteral(":/artwork/keyfall/%1.png").arg(QString::fromLatin1(name)));
+	if (width > 0 && height > 0) { pixmap = pixmap.scaled(width, height, Qt::IgnoreAspectRatio, Qt::SmoothTransformation); }
+	return pixmap;
+}
+} // namespace PLUGIN_NAME
 
 namespace lmms {
 
 extern "C" {
 Plugin::Descriptor PLUGIN_EXPORT keyfall_plugin_descriptor
-	= {LMMS_STRINGIFY(PLUGIN_NAME), "KeyFall",
+	= {STRINGIFY(PLUGIN_NAME), "KeyFall",
 		QT_TRANSLATE_NOOP("PluginBrowser", "Practise a MIDI clip on your keyboard with falling notes and scoring"),
-		"Mikhail Zotochev <zotochev@gmail.com>", 0x0100, Plugin::Type::Tool, new PluginPixmapLoader("logo"),
+		"Mikhail Zotochev <zotochev@gmail.com>", 0x0100, Plugin::Tool, new PluginPixmapLoader("logo"),
 		nullptr, nullptr};
 
 PLUGIN_EXPORT Plugin* lmms_plugin_main(Model*, void*)
@@ -123,7 +133,7 @@ KeyFall::KeyFall()
 		});
 	});
 	connect(song, &Song::projectLoaded, this, [this] { selectClip(nullptr); });
-	connect(song, &Song::playbackPositionJumped, this, &KeyFall::transportJumped);
+	connect(song, &Song::playbackPositionChanged, this, &KeyFall::transportJumped);
 	connect(song, &Song::playbackStateChanged, this, &KeyFall::transportJumped);
 }
 
@@ -235,28 +245,28 @@ void KeyFall::applyLayout(const QString& id, bool persist)
 QVector<ClipChoice> KeyFall::listClips() const
 {
 	QVector<ClipChoice> result;
-	const int ticksPerBar = std::max(1, Engine::getSong()->ticksPerBar());
+	const int ticksPerBar = std::max(1, Engine::getSong()->ticksPerTact());
 	for (Track* track : Engine::getSong()->tracks())
 	{
-		if (track->type() != Track::Type::Instrument) { continue; }
-		for (Clip* clip : track->getClips())
+		if (track->type() != Track::InstrumentTrack) { continue; }
+		for (TrackContentObject* clip : track->getTCOs())
 		{
-			auto* midiClip = dynamic_cast<MidiClip*>(clip);
-			if (!midiClip) { continue; }
-			const int firstBar = midiClip->startPosition().getTicks() / ticksPerBar + 1;
-			const int lastBar = (midiClip->startPosition().getTicks() + std::max(1, midiClip->length().getTicks() - 1))
+			auto* pattern = dynamic_cast<Pattern*>(clip);
+			if (!pattern) { continue; }
+			const int firstBar = pattern->startPosition().getTicks() / ticksPerBar + 1;
+			const int lastBar = (pattern->startPosition().getTicks() + std::max(1, pattern->length().getTicks() - 1))
 				/ ticksPerBar + 1;
 			QString label = track->name();
-			if (!midiClip->name().isEmpty() && midiClip->name() != track->name()) { label += " › " + midiClip->name(); }
+			if (!pattern->name().isEmpty() && pattern->name() != track->name()) { label += " › " + pattern->name(); }
 			label += firstBar == lastBar ? tr("  (bar %1)").arg(firstBar) : tr("  (bars %1–%2)").arg(firstBar).arg(lastBar);
-			if (midiClip->notes().empty()) { label += tr(", empty"); }
-			result.push_back({midiClip, label});
+			if (pattern->notes().empty()) { label += tr(", empty"); }
+			result.push_back({pattern, label});
 		}
 	}
 	return result;
 }
 
-void KeyFall::selectClip(MidiClip* clip)
+void KeyFall::selectClip(Pattern* clip)
 {
 	for (const auto& c : m_clipConnections) { disconnect(c); }
 	m_clipConnections.clear();
@@ -265,8 +275,8 @@ void KeyFall::selectClip(MidiClip* clip)
 	{
 		// Note edits, resizing and moving the clip all change what has to fall
 		m_clipConnections << connect(clip, &Model::dataChanged, this, &KeyFall::rebuildChart)
-			<< connect(clip, &Clip::lengthChanged, this, &KeyFall::rebuildChart)
-			<< connect(clip, &Clip::positionChanged, this, &KeyFall::rebuildChart)
+			<< connect(clip, &TrackContentObject::lengthChanged, this, &KeyFall::rebuildChart)
+			<< connect(clip, &TrackContentObject::positionChanged, this, &KeyFall::rebuildChart)
 			<< connect(clip, &QObject::destroyed, this, [this] { selectClip(nullptr); });
 	}
 	rebuildChart();
@@ -279,7 +289,6 @@ void KeyFall::rebuildChart()
 	if (m_clip)
 	{
 		length = m_clip->length().getTicks();
-		offset = m_clip->startTimeOffset().getTicks();
 		raw.reserve(m_clip->notes().size());
 		for (const Note* n : m_clip->notes())
 		{
@@ -297,29 +306,29 @@ TransportSample KeyFall::sampleTransport() const
 	TransportSample s;
 	const Song* song = Engine::getSong();
 	const float framesPerTick = std::max(1e-3f, Engine::framesPerTick());
-	s.ticksPerSecond = Engine::audioEngine()->outputSampleRate() / framesPerTick;
-	s.latencyTicks = Engine::audioEngine()->framesPerPeriod() / framesPerTick;
-	s.ticksPerBar = std::max(1, song->ticksPerBar());
+	s.ticksPerSecond = Engine::mixer()->processingSampleRate() / framesPerTick;
+	s.latencyTicks = Engine::mixer()->framesPerPeriod() / framesPerTick;
+	s.ticksPerBar = std::max(1, song->ticksPerTact());
 	s.beatsPerBar = std::max(1, const_cast<Song*>(song)->getTimeSigModel().getNumerator());
 
 	const auto mode = song->playMode();
 	const double clipStart = m_clip ? m_clip->startPosition().getTicks() : 0;
-	const double clipOffset = m_clip ? m_clip->startTimeOffset().getTicks() : 0;
+	const double clipOffset = 0;
 	s.songTickOfChartZero = clipStart;
 
-	if (mode == Song::PlayMode::MidiClip)
+	if (mode == Song::Mode_PlayPattern)
 	{
-		// Piano Roll playback: the timeline is in the clip's note coordinates
-		const auto& tl = song->getTimeline(Song::PlayMode::MidiClip);
-		s.chartTick = tl.ticks() + tl.frameOffset() / framesPerTick + clipOffset;
+		// Piano Roll playback: the position is in the clip's note coordinates
+		const auto& pos = song->getPlayPos(Song::Mode_PlayPattern);
+		s.chartTick = pos.getTicks() + pos.currentFrame() / framesPerTick + clipOffset;
 		s.playing = song->isPlaying();
 	}
 	else
 	{
-		const auto& tl = song->getTimeline(Song::PlayMode::Song);
-		s.chartTick = tl.ticks() + tl.frameOffset() / framesPerTick - clipStart;
-		s.playing = song->isPlaying() && mode == Song::PlayMode::Song;
-		s.supportedMode = !(song->isPlaying() && mode == Song::PlayMode::Pattern);
+		const auto& pos = song->getPlayPos(Song::Mode_PlaySong);
+		s.chartTick = pos.getTicks() + pos.currentFrame() / framesPerTick - clipStart;
+		s.playing = song->isPlaying() && mode == Song::Mode_PlaySong;
+		s.supportedMode = !(song->isPlaying() && mode == Song::Mode_PlayBB);
 	}
 	return s;
 }

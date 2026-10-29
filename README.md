@@ -6,19 +6,23 @@ The full build guide from scratch, for Windows and Linux, along with solutions t
 
 ## Building
 
-### Linux: just the plug-in, against installed LMMS headers
+### This branch: LMMS 1.2.x (Linux)
 
-Needs CMake, a C++20 compiler, Qt (Widgets, Xml; the major version your LMMS uses) and the headers of the LMMS you run, from LMMS master (1.3 development line) at or after commit `bed447b`. LMMS itself is not linked: its symbols come from the running `lmms`.
+Branch `lmms-1.2` is KeyFall ported to the LMMS 1.2 plug-in API (`Pattern`, `MidiTime`, `Mixer`, ...), for the LMMS that distributions ship today. It is temporary: once LMMS 1.3 is released, `main` is the only line. New work happens on `main`; this branch only gets what is ported to it.
+
+Needs CMake, a C++20 compiler, Qt 5 (Widgets, Xml) and the headers of the installed LMMS 1.2.x. LMMS itself is not linked: its symbols come from the running `lmms`.
 
 ```bash
-cmake -S plugin -B build -DLMMS_INCLUDE_DIR=/usr/include/lmms   # -DQT_VERSION_MAJOR=6 for a Qt 6 LMMS
+cmake -S plugin -B build -DLMMS_INCLUDE_DIR=/usr/include/lmms
 cmake --build build
-cp build/libkeyfall.so ~/Documents/lmms/plugins/   # or LMMS_PLUGIN_DIR=$PWD/build lmms
+cp build/libkeyfall.so ~/Documents/lmms/plugins/   # LMMS's working folder; or LMMS_PLUGIN_DIR=$PWD/build lmms
 ```
 
-KeyFall then appears under Tools → KeyFall. LMMS 1.2.x is not supported (different plug-in API).
+KeyFall then appears under Tools → KeyFall.
 
-### Development: LMMS from source with KeyFall inside
+Differences from `main`: no clip start offset (LMMS 1.2 clips cannot be cropped on the left).
+
+### Development (`main` branch): LMMS from source with KeyFall inside
 
 The scripts expect an LMMS clone at the commit pinned in them (`bed447b`), by default in `~/Projects/lmms` (`%USERPROFILE%\Projects\lmms` on Windows; `LMMS_SRC` overrides). The plugin code stays in `plugin/`; `configure` links it into LMMS as `plugins/KeyFall`.
 

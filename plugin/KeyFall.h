@@ -35,19 +35,18 @@
 
 #include "KeyFallView.h"
 #include "LayoutRepository.h"
-#include "MidiClip.h"
+#include "InstrumentTrack.h"
+#include "Pattern.h"
 #include "ToolPlugin.h"
 #include "core/Chart.h"
 #include "core/InputResolver.h"
 
 namespace lmms {
 
-class InstrumentTrack;
-
 //! One clip the user can practise
 struct ClipChoice
 {
-	QPointer<MidiClip> clip;
+	QPointer<Pattern> clip;
 	QString label; //!< "Track > clip (bars a-b)"
 };
 
@@ -97,7 +96,7 @@ public:
 	void saveSettings(QDomDocument&, QDomElement&) override {}
 	void loadSettings(const QDomElement&) override {}
 
-	gui::PluginView* instantiateView(QWidget*) override { return new gui::KeyFallView(this); }
+	::PluginView* instantiateView(QWidget*) override { return new gui::KeyFallView(this); }
 
 	// --- MIDI input -------------------------------------------------------
 
@@ -122,8 +121,8 @@ public:
 
 	//! Instrument-track clips of the current song (Pattern editor clips are not supported yet)
 	QVector<ClipChoice> listClips() const;
-	MidiClip* currentClip() const { return m_clip; }
-	void selectClip(MidiClip* clip);
+	Pattern* currentClip() const { return m_clip; }
+	void selectClip(Pattern* clip);
 	std::shared_ptr<const kf::Chart> chart() const { return m_chart; }
 	const kf::ChartStats& chartStats() const { return m_chartStats; }
 
@@ -161,7 +160,7 @@ private:
 	QString m_currentLayoutId;
 	std::shared_ptr<const kf::layout::KeyboardLayout> m_currentLayout;
 
-	QPointer<MidiClip> m_clip;
+	QPointer<Pattern> m_clip;
 	QVector<QMetaObject::Connection> m_clipConnections;
 	std::shared_ptr<const kf::Chart> m_chart;
 	kf::ChartStats m_chartStats;
