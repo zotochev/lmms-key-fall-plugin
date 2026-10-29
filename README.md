@@ -4,13 +4,11 @@ A Tool plugin for LMMS: a trainer for playing on a MIDI keyboard. It shows falli
 
 The full build guide from scratch, for Windows and Linux, along with solutions to common problems, is in [docs/BUILD.md](docs/BUILD.md).
 
-## Environment (Windows)
+## Building
 
-| What | Where |
-|---|---|
-| LMMS source | `C:\Users\mikhail\Projects\lmms`, branch `keyfall`, based on commit `bed447b` |
-| Plugin code | `plugin/`. LMMS sees it as `plugins/KeyFall` through a junction (a symlink on Linux), which `configure` creates |
-| Toolchain | Visual Studio, Qt 6.8.3 in `C:\Qt`, vcpkg in `C:\vcpkg` |
+KeyFall is built as part of LMMS. The scripts expect an LMMS clone at the commit pinned in them (`bed447b`), by default in `~/Projects/lmms` (`%USERPROFILE%\Projects\lmms` on Windows; `LMMS_SRC` overrides). The plugin code stays in `plugin/`; `configure` links it into LMMS as `plugins/KeyFall`.
+
+Windows (Visual Studio, Qt 6.8 in `C:\Qt`, vcpkg in `C:\vcpkg`):
 
 ```bat
 scripts\lmms.cmd configure   :: the first run builds the vcpkg dependencies (20-60 min)

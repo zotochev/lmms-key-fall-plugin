@@ -4,6 +4,6 @@
   <app configured="1" nomsgaftersetup="1" openlastproject="0" language="en"/>
   <audioengine audiodev="SDL (Simple DirectMedia Layer)" mididev="WinMM MIDI" framesperaudiobuffer="256" hqaudio="0"/>
   <midi midiautoassign="lmms"/>
-  <paths workingdir="C:/Users/mikhail/Documents/lmms/" stkdir="data:/stk/rawwaves/" artwork="data:/themes/default/" theme="data:/themes/default/"/>
+  <paths workingdir="@HOME@/Documents/lmms/" stkdir="data:/stk/rawwaves/" artwork="data:/themes/default/" theme="data:/themes/default/"/>
   <ui enableautosave="0" disableautoquit="1"/>
 </lmms>

@@ -84,7 +84,7 @@ public:
 ### Этап 1. Сборка LMMS из исходников — ✅ Windows (2026-10-28), ✅ Linux (WSL Ubuntu 24.04, 2026-10-29)
 
 **Итог на Windows:**
-- LMMS лежит в `C:\Users\mikhail\Projects\lmms`, ветка `keyfall` от коммита `bed447b`.
+- LMMS лежит рядом с репозиторием (`Projects\lmms`), ветка `keyfall` от коммита `bed447b`.
 - Окружение: VS 2022 (MSVC 19.41), Qt 6.8.3 в `C:\Qt`, vcpkg в `C:\vcpkg`.
 - Upstream требует MSVC 19.51 (VS 2026) только формальной проверкой. Проверку для VS 2022 ослабляет локальный коммит в ветке `keyfall` клона LMMS; в репозитории KeyFall этого патча нет (убран 2026-10-29, другим он не нужен).
 - Сборка и запуск: `scripts\lmms.cmd configure|build|run`. Dev-сборка берёт отдельный конфиг `dev/lmmsrc-dev.xml`, в нём автоподключение MIDI-порта `lmms`.

@@ -53,6 +53,8 @@ exit /b %ERRORLEVEL%
 :run
 set "PATH=%LMMS_BUILD%\vcpkg_installed\x64-windows\bin;%PATH%"
 rem Separate config so the dev build never touches the installed LMMS's ~/.lmmsrc.xml
-if not exist "%~dp0..\dev\lmmsrc-dev.xml" copy "%~dp0..\dev\lmmsrc-dev.template.xml" "%~dp0..\dev\lmmsrc-dev.xml" >nul
+rem The template's @HOME@ becomes the user's profile folder (LMMS wants forward slashes)
+if not exist "%~dp0..\dev\lmmsrc-dev.xml" powershell -NoProfile -Command ^
+  "[IO.File]::WriteAllText('%~dp0..\dev\lmmsrc-dev.xml', [IO.File]::ReadAllText('%~dp0..\dev\lmmsrc-dev.template.xml').Replace('@HOME@', $env:USERPROFILE.Replace('\','/')))"
 start "" /D "%LMMS_BUILD%" "%LMMS_BUILD%\lmms.exe" --config "%~dp0..\dev\lmmsrc-dev.xml"
 exit /b 0
