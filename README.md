@@ -6,7 +6,21 @@ The full build guide from scratch, for Windows and Linux, along with solutions t
 
 ## Building
 
-KeyFall is built as part of LMMS. The scripts expect an LMMS clone at the commit pinned in them (`bed447b`), by default in `~/Projects/lmms` (`%USERPROFILE%\Projects\lmms` on Windows; `LMMS_SRC` overrides). The plugin code stays in `plugin/`; `configure` links it into LMMS as `plugins/KeyFall`.
+### Linux: just the plug-in, against installed LMMS headers
+
+Needs CMake, a C++20 compiler, Qt (Widgets, Xml; the major version your LMMS uses) and the headers of the LMMS you run, from LMMS master (1.3 development line) at or after commit `bed447b`. LMMS itself is not linked: its symbols come from the running `lmms`.
+
+```bash
+cmake -S plugin -B build -DLMMS_INCLUDE_DIR=/usr/include/lmms   # -DQT_VERSION_MAJOR=6 for a Qt 6 LMMS
+cmake --build build
+cp build/libkeyfall.so ~/Documents/lmms/plugins/   # or LMMS_PLUGIN_DIR=$PWD/build lmms
+```
+
+KeyFall then appears under Tools → KeyFall. LMMS 1.2.x is not supported (different plug-in API).
+
+### Development: LMMS from source with KeyFall inside
+
+The scripts expect an LMMS clone at the commit pinned in them (`bed447b`), by default in `~/Projects/lmms` (`%USERPROFILE%\Projects\lmms` on Windows; `LMMS_SRC` overrides). The plugin code stays in `plugin/`; `configure` links it into LMMS as `plugins/KeyFall`.
 
 Windows (Visual Studio, Qt 6.8 in `C:\Qt`, vcpkg in `C:\vcpkg`):
 

@@ -135,6 +135,8 @@ On Windows the script calls `winmm.dll` directly. The only extra package is `mid
 
 ## Linux (Ubuntu 24.04)
 
+To build only the plug-in against an LMMS that is already installed with its headers, no LMMS checkout is needed: see the README, section "Linux: just the plug-in" (`cmake -S plugin -B build -DLMMS_INCLUDE_DIR=...`). The rest of this section builds LMMS itself from source, for development.
+
 Tested 2026-10-29 in WSL 2 (Ubuntu 24.04.4, GCC 13, Qt 5.15):
 - the KeyFall core builds with `-Wall -Wextra -Wpedantic` without warnings, and all test sets pass;
 - LMMS with the plugin builds, starts and loads `libkeyfall.so`; this was checked by an offscreen launch.
