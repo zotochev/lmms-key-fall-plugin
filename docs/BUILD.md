@@ -147,32 +147,31 @@ Tested 2026-10-29 in WSL 2 (Ubuntu 24.04.4, GCC 13, Qt 5.15):
 - the KeyFall core builds with `-Wall -Wextra -Wpedantic` without warnings, and all test sets pass;
 - LMMS with the plugin builds, starts and loads `libkeyfall.so`; this was checked by an offscreen launch.
 
-Dependencies come from the LMMS CI list, trimmed to what we need. One command (needs `sudo`):
+All steps go through [`scripts/lmms.sh`](../scripts/lmms.sh), the Linux counterpart of `lmms.cmd`:
 
 ```bash
-sudo sh scripts/linux-deps.sh
+cd ~/Projects/key-fall
+scripts/lmms.sh deps        # build dependencies (Ubuntu/Debian, asks for sudo)
+scripts/lmms.sh fetch       # clone LMMS at the pinned commit into ~/Projects/lmms
+scripts/lmms.sh configure   # link plugin/ into LMMS as plugins/KeyFall, run CMake
+scripts/lmms.sh build
+scripts/lmms.sh run         # or: scripts/lmms.sh run dev/test-song.mmp
 ```
 
-```bash
-cd ~/Projects
-git clone https://github.com/LMMS/lmms.git && cd lmms
-git checkout -b keyfall bed447baab187ea6292449048e0b1aab16082e3b
-git submodule update --init --recursive
-ln -s ../../key-fall/plugin plugins/KeyFall && echo plugins/KeyFall >> .git/info/exclude
-cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLMMS_MINIMAL=ON -DPLUGIN_LIST="KeyFall TapTempo MidiImport"
-cmake --build build -j"$(nproc)"
-./build/lmms
-```
+| Command | What it does |
+|---|---|
+| `deps` | Installs the packages from [`scripts/linux-deps.sh`](../scripts/linux-deps.sh) (the LMMS CI list, trimmed to what we need) |
+| `fetch` | Clones LMMS, checks out the pinned commit on branch `keyfall`, fetches submodules. Does nothing if LMMS is already there |
+| `configure` | Creates the symlink `plugins/KeyFall → key-fall/plugin` (and hides it from LMMS's `git status`), then CMake with the minimal plug-in set plus KeyFall, `TapTempo`, `MidiImport`. Uses Ninja when installed |
+| `build` | Builds LMMS + KeyFall on all cores (`JOBS=4` to limit) |
+| `run` | Starts the built LMMS with its own config `dev/lmmsrc-dev-linux.xml` (SDL audio, ALSA sequencer MIDI), created on first run; `~/.lmmsrc.xml` of an installed LMMS stays untouched. Extra arguments go to LMMS |
+| `test` | KeyFall core tests without LMMS and Qt, built into `build-tests-linux` |
+
+Paths can be overridden with `LMMS_SRC` (default `~/Projects/lmms`) and `LMMS_BUILD` (default `$LMMS_SRC/build`).
 
 On Linux LMMS needs no patches.
 
-KeyFall core tests without LMMS:
-
-```bash
-cmake -S tests -B build-tests && cmake --build build-tests -j"$(nproc)" && ctest --test-dir build-tests
-```
-
-**WSL.** Build on the Linux file system (`~/...`), not under `/mnt/c`, because it is many times faster. The plugin can still stay in the Windows copy of the repository: make the link absolute, e.g. `ln -s /mnt/c/Users/<you>/Projects/key-fall/plugin plugins/KeyFall`. WSLg shows the LMMS window. WSL has no sound card or ALSA MIDI, so ALSA messages at startup are expected.
+**WSL.** Keep LMMS on the Linux file system (`~/...`), not under `/mnt/c`, because building there is many times faster. The repository itself can stay in the Windows copy: run `/mnt/c/Users/<you>/Projects/key-fall/scripts/lmms.sh ...`, and the symlink points there. WSLg shows the LMMS window. WSL has no sound card or ALSA MIDI, so ALSA messages at startup are expected.
 
 To test without a keyboard: `pip install mido python-rtmidi`, then `python scripts/virtual_player.py chords`. Without `--port` the script creates its own ALSA port, `KeyFall Virtual Player`; connect it to LMMS in the track's MIDI → Input menu. This needs a real Linux machine with ALSA, not WSL.
 

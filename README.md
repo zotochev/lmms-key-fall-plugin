@@ -10,7 +10,7 @@ The full build guide from scratch, for Windows and Linux, along with solutions t
 |---|---|
 | LMMS source | `C:\Users\mikhail\Projects\lmms`, branch `keyfall`, based on commit `bed447b` |
 | Patches for LMMS | None are needed for the plugin itself. `patches/lmms-0001-…` only lets LMMS build with VS 2022 |
-| Plugin code | `plugin/`. LMMS sees it as `plugins/KeyFall` through a junction, which `scripts\lmms.cmd configure` creates |
+| Plugin code | `plugin/`. LMMS sees it as `plugins/KeyFall` through a junction (a symlink on Linux), which `configure` creates |
 | Toolchain | VS 2022, Qt 6.8.3 in `C:\Qt`, vcpkg in `C:\vcpkg` |
 
 ```bat
@@ -18,6 +18,17 @@ scripts\lmms.cmd configure   :: the first run builds the vcpkg dependencies (20-
 scripts\lmms.cmd build
 scripts\lmms.cmd run         :: uses its own config, dev\lmmsrc-dev.xml
 scripts\lmms.cmd test        :: core tests and layout checks (no LMMS needed)
+```
+
+Linux (Ubuntu 24.04, GCC, Qt 5):
+
+```bash
+scripts/lmms.sh deps         # build dependencies, asks for sudo
+scripts/lmms.sh fetch        # LMMS at the pinned commit into ~/Projects/lmms
+scripts/lmms.sh configure
+scripts/lmms.sh build
+scripts/lmms.sh run          # its own config, dev/lmmsrc-dev-linux.xml
+scripts/lmms.sh test
 ```
 
 ## Scoring and the demo performer
