@@ -78,10 +78,13 @@ public:
 
 	//! Called with ctrl+wheel steps (+1 = longer look-ahead)
 	std::function<void(int)> onLookaheadStep;
+	//! A bar of the result heat map was clicked (1-based song bar number)
+	std::function<void(int)> onBarClicked;
 
 protected:
 	void paintEvent(QPaintEvent*) override;
 	void wheelEvent(QWheelEvent* event) override;
+	void mousePressEvent(QMouseEvent* event) override;
 
 private:
 	struct Ghost
@@ -106,6 +109,8 @@ private:
 	std::vector<Ghost> m_ghosts;
 	const std::vector<kf::Grade>* m_grades = nullptr;
 	std::optional<kf::ScoreSummary> m_summary;
+	//! Heat map cells of the visible result card, for clicks
+	mutable std::vector<std::pair<QRectF, int>> m_barCells;
 };
 
 } // namespace lmms::gui

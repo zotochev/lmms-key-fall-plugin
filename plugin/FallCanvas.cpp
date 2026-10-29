@@ -24,6 +24,7 @@
 
 #include "FallCanvas.h"
 
+#include <QMouseEvent>
 #include <QPainter>
 #include <QWheelEvent>
 #include <algorithm>
@@ -152,6 +153,28 @@ void FallCanvas::wheelEvent(QWheelEvent* event)
 		return;
 	}
 	QWidget::wheelEvent(event);
+}
+
+void FallCanvas::mousePressEvent(QMouseEvent* event)
+{
+	if (m_summary && !m_timeline.playing && onBarClicked)
+	{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+		const QPointF pos = event->position();
+#else
+		const QPointF pos = event->localPos(); // Linux builds use Qt 5
+#endif
+		for (const auto& [cell, bar] : m_barCells)
+		{
+			if (cell.adjusted(-1, -2, 1, 14).contains(pos))
+			{
+				onBarClicked(bar);
+				event->accept();
+				return;
+			}
+		}
+	}
+	QWidget::mousePressEvent(event);
 }
 
 double FallCanvas::yForTick(double tick, double lookaheadTicks) const
@@ -329,6 +352,7 @@ void FallCanvas::paintSummary(QPainter& p) const
 	p.drawText(inner.adjusted(0, 52, 0, 0), Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap, timing);
 
 	// Heat map: one cell per bar, the most actionable view of where to practise
+	m_barCells.clear();
 	if (!s.barAccuracy.empty())
 	{
 		const double cellsTop = inner.top() + 100;
@@ -343,6 +367,7 @@ void FallCanvas::paintSummary(QPainter& p) const
 			p.setPen(Qt::NoPen);
 			p.setBrush(acc < 0 ? BeatLine : heat(acc));
 			p.drawRoundedRect(cell, 2, 2);
+			m_barCells.emplace_back(cell, s.firstBar + static_cast<int>(b));
 			if (cellW >= 16)
 			{
 				p.setPen(MessageText);
@@ -355,7 +380,9 @@ void FallCanvas::paintSummary(QPainter& p) const
 	f.setPixelSize(11);
 	p.setFont(f);
 	p.setPen(MessageText);
-	p.drawText(inner, Qt::AlignHCenter | Qt::AlignBottom, tr("Press Play (song) or Practise to try again"));
+	p.drawText(inner, Qt::AlignHCenter | Qt::AlignBottom, s.barAccuracy.empty()
+		? tr("Press Play (song) or Practise to try again")
+		: tr("Click a bar to practise it in a loop \u00b7 Play or Practise to try again"));
 }
 
 void FallCanvas::paintEvent(QPaintEvent*)
@@ -384,6 +411,7 @@ void FallCanvas::paintEvent(QPaintEvent*)
 	p.fillRect(QRectF(0, height() - 2, width(), 2), HitLine);
 	paintStatus(p);
 	if (m_summary && !m_timeline.playing) { paintSummary(p); }
+	else { m_barCells.clear(); }
 
 	// Ghosts that floated out of view are dropped here, where their age is known
 	const double pxPerSecond = height() / m_lookaheadSeconds;

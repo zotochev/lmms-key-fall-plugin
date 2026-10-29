@@ -111,6 +111,7 @@ KeyFallView::KeyFallView(KeyFall* plugin)
 	};
 	m_fall->setToolTip(tr("Ctrl + mouse wheel: show more or less time ahead"));
 	m_fall->setGrades(&m_scorer.grades());
+	m_fall->onBarClicked = [this](int bar) { practiseBar(bar); };
 
 	auto mainLayout = new QVBoxLayout(this);
 	mainLayout->setContentsMargins(0, 0, 0, 0);
@@ -213,6 +214,10 @@ QWidget* KeyFallView::createPracticeBar()
 	m_waitCheck->setToolTip(tr("Time stops at each chord until you play all of its keys"));
 	m_waitCheck->setChecked(flag("wait", false));
 
+	m_anyNoteCheck = new QCheckBox(tr("Any note"));
+	m_anyNoteCheck->setToolTip(tr("Beginner wait mode: one key of each chord is enough to go on"));
+	m_anyNoteCheck->setChecked(flag("anynote", false));
+
 	m_tempoSpin = new QSpinBox();
 	m_tempoSpin->setRange(25, 100);
 	m_tempoSpin->setSingleStep(5);
@@ -220,6 +225,11 @@ QWidget* KeyFallView::createPracticeBar()
 	m_tempoSpin->setPrefix(tr("Tempo "));
 	m_tempoSpin->setToolTip(tr("Practice tempo relative to the song"));
 	m_tempoSpin->setValue(config->value(ConfigSection, "practicetempo", "100").toInt());
+
+	m_autoTempoCheck = new QCheckBox(tr("Auto"));
+	m_autoTempoCheck->setToolTip(tr("In a loop: 5 % faster after two passes of 90 % or more, "
+		"5 % slower after two passes below 70 %"));
+	m_autoTempoCheck->setChecked(flag("autotempo", false));
 
 	m_loopCheck = new QCheckBox(tr("Loop bars"));
 	m_loopCheck->setToolTip(tr("Repeat a passage; each pass is scored on its own"));
@@ -238,6 +248,14 @@ QWidget* KeyFallView::createPracticeBar()
 		ConfigManager::inst()->setValue(ConfigSection, "wait", on ? "1" : "0");
 		m_restartPending = true; // a different kind of run
 	});
+	connect(m_anyNoteCheck, &QCheckBox::toggled, this, [this](bool on) {
+		ConfigManager::inst()->setValue(ConfigSection, "anynote", on ? "1" : "0");
+		m_restartPending = true;
+	});
+	connect(m_autoTempoCheck, &QCheckBox::toggled, this, [this](bool on) {
+		ConfigManager::inst()->setValue(ConfigSection, "autotempo", on ? "1" : "0");
+		m_tempoCoach.reset();
+	});
 	connect(m_tempoSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [](int value) {
 		ConfigManager::inst()->setValue(ConfigSection, "practicetempo", QString::number(value));
 	});
@@ -250,8 +268,10 @@ QWidget* KeyFallView::createPracticeBar()
 
 	layout->addWidget(m_practiceButton);
 	layout->addWidget(m_waitCheck);
+	layout->addWidget(m_anyNoteCheck);
 	layout->addSpacing(8);
 	layout->addWidget(m_tempoSpin);
+	layout->addWidget(m_autoTempoCheck);
 	layout->addSpacing(8);
 	layout->addWidget(m_loopCheck);
 	layout->addWidget(m_loopFrom);
@@ -681,6 +701,7 @@ void KeyFallView::startRun(double tick, const TransportSample& s)
 	{
 		const auto loop = practiceLoop();
 		m_wait.setChart(m_plugin->chart(), kf::Scorer::ChordMs / 1000.0 * m_ticksPerSecond);
+		m_wait.setAnyNoteCompletes(m_anyNoteCheck->isChecked());
 		m_wait.reset(tick, loop ? loop->end : 1e300);
 		m_fall->setGrades(&m_wait.grades());
 	}
@@ -719,6 +740,17 @@ void KeyFallView::finishRun(const TransportSample& s)
 		if (w.completed == 0) { summary.expected = 0; }
 	}
 	else { summary = m_scorer.summary(s.ticksPerBar, s.songTickOfChartZero); }
+
+	// Loop practice with auto tempo: adjust after each completed pass
+	m_hudNote.clear();
+	if (m_practiceActive && practiceLoop() && !summary.waitMode && summary.expected > 0)
+	{
+		const int tempo = m_tempoSpin->value();
+		const int next = m_autoTempoCheck->isChecked() ? m_tempoCoach.onPass(summary.overallPercent, tempo) : tempo;
+		m_hudNote = next == tempo ? tr("last pass %1%").arg(qRound(summary.overallPercent))
+			: tr("last pass %1% \u2192 tempo %2%").arg(qRound(summary.overallPercent)).arg(next);
+		if (next != tempo) { m_tempoSpin->setValue(next); }
+	}
 	// A pass without a single judged note (e.g. stopped right away) leaves the last result in place
 	if (summary.expected > 0) { m_fall->setSummary(summary); }
 	updateHud();
@@ -728,7 +760,7 @@ void KeyFallView::updateHud()
 {
 	if (!m_runActive)
 	{
-		m_hudLabel->clear();
+		m_hudLabel->setText(m_hudNote);
 		return;
 	}
 	if (m_runIsWait)
@@ -748,6 +780,7 @@ void KeyFallView::updateHud()
 		const int ms = qRound(std::abs(mean));
 		text += ms < 10 ? tr("  ·  on time") : mean > 0 ? tr("  ·  %1 ms late").arg(ms) : tr("  ·  %1 ms early").arg(ms);
 	}
+	if (!m_hudNote.isEmpty()) { text += QStringLiteral("  \u00b7  ") + m_hudNote; }
 	m_hudLabel->setText(text);
 }
 
@@ -806,6 +839,8 @@ void KeyFallView::startPractice()
 	m_practiceActive = true;
 	m_restartPending = true;
 	m_clickArmed = false;
+	m_tempoCoach.reset();
+	m_hudNote.clear();
 	m_autoplayQueue.clear();
 	m_practiceButton->setText(tr("■ Stop"));
 }
@@ -847,6 +882,17 @@ void KeyFallView::updateLoopRange()
 	}
 	m_loopFrom->setValue(firstBar);
 	m_loopTo->setValue(lastBar);
+}
+
+void KeyFallView::practiseBar(int songBar)
+{
+	// From the result card straight into a loop of that bar
+	m_loopCheck->setChecked(true);
+	m_loopFrom->setValue(songBar);
+	m_loopTo->setValue(songBar);
+	m_fall->setSummary(std::nullopt);
+	if (!m_practiceActive) { m_practiceButton->setChecked(true); }
+	else { startPractice(); }
 }
 
 void KeyFallView::playClick(bool downbeat)

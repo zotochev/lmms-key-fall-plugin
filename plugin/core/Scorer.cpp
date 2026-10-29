@@ -80,12 +80,17 @@ void Scorer::setTempo(double ticksPerSecond, double ticksPerBeat)
 	m_ticksPerBeat = std::max(1.0, ticksPerBeat);
 }
 
-void Scorer::start(double fromTick, double ticksPerSecond, double ticksPerBeat)
+void Scorer::start(double fromTick, double ticksPerSecond, double ticksPerBeat, const std::vector<bool>* active)
 {
 	setTempo(ticksPerSecond, ticksPerBeat);
 	const auto& notes = m_chart->notes();
 	m_grades.assign(notes.size(), Grade::Pending);
 	m_deltaMs.assign(notes.size(), 0.0);
+	m_active = active && active->size() == notes.size() ? *active : std::vector<bool>{};
+	for (std::size_t i = 0; i < m_active.size(); ++i)
+	{
+		if (!m_active[i]) { m_grades[i] = Grade::Skipped; }
+	}
 	// A note that is already sounding when playback starts cannot be played in time
 	const double tolerance = msToTicks(windows().okMs) * 0.5;
 	for (std::size_t i = 0; i < notes.size(); ++i)
@@ -148,6 +153,17 @@ PressResult Scorer::press(int key, double tick)
 		m_deltaMs[i] = result.deltaMs;
 		m_bestStreak = std::max(m_bestStreak, ++m_streak);
 		return result;
+	}
+
+	// Playing along with the hand that is not being practised is fine
+	for (auto it = from; !m_active.empty() && it != notes.end() && it->start <= tick + okTicks; ++it)
+	{
+		const auto i = static_cast<std::size_t>(it - notes.begin());
+		if (it->key == key && !m_active[i])
+		{
+			result.kind = PressResult::Kind::Ignored;
+			return result;
+		}
 	}
 
 	// A neighbouring key grazed together with a written note is not a real mistake

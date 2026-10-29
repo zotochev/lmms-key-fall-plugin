@@ -498,6 +498,48 @@ void testWaitGate()
 	CHECK(gate.gateTick() == 48.0);
 }
 
+void testHands()
+{
+	using Kind = kf::PressResult::Kind;
+	// Left hand C3 + right hand E4 together, then right hand G4
+	const auto chart = chartOf({{0, 48, 48, 100}, {0, 48, 64, 100}, {48, 48, 67, 100}});
+	const std::vector<bool> rightOnly = {false, true, true};
+
+	kf::Scorer s;
+	s.setChart(chart);
+	s.start(0, Tps, Tpb, &rightOnly);
+	CHECK(s.grades()[0] == kf::Grade::Skipped);
+	CHECK(s.press(48, ms(5)).kind == Kind::Ignored); // playing the other hand along: no penalty
+	CHECK(s.press(64, ms(5)).kind == Kind::Hit);
+	CHECK(s.press(67, 48 + ms(5)).kind == Kind::Hit);
+	const auto sum = s.summary(192, 0);
+	CHECK(sum.hits == 2 && sum.extras == 0 && sum.expected == 2 && sum.notesPercent == 100);
+
+	kf::WaitGate gate;
+	gate.setChart(chart, 2);
+	gate.reset(0, 1e300, &rightOnly);
+	CHECK(gate.stats().chords == 2);
+	CHECK(gate.currentNotes().size() == 1); // only E4: C3 belongs to the other hand
+	CHECK(gate.grades()[0] == kf::Grade::Skipped);
+	CHECK(gate.press(64) && gate.gateTick() == 48.0);
+}
+
+void testTempoCoach()
+{
+	kf::TempoCoach coach;
+	CHECK(coach.onPass(95, 60) == 60); // one clean pass is not enough
+	CHECK(coach.onPass(92, 60) == 65); // two in a row: faster
+	CHECK(coach.onPass(95, 65) == 65); // counting starts again
+	CHECK(coach.onPass(80, 65) == 65); // a middling pass resets the streaks
+	CHECK(coach.onPass(95, 65) == 65);
+	CHECK(coach.onPass(50, 65) == 65);
+	CHECK(coach.onPass(40, 65) == 60); // two poor passes: slower
+	CHECK(coach.onPass(99, 100) == 100);
+	CHECK(coach.onPass(99, 100) == 100); // never above 100 %
+	CHECK(coach.onPass(10, 25) == 25);
+	CHECK(coach.onPass(10, 25) == 25);   // never below 25 %
+}
+
 } // namespace
 
 int main()
@@ -524,6 +566,8 @@ int main()
 		{"calibration", testCalibration},
 		{"practice clock", testPracticeClock},
 		{"wait gate", testWaitGate},
+		{"hands", testHands},
+		{"tempo coach", testTempoCoach},
 	};
 	for (const auto& [name, fn] : tests)
 	{

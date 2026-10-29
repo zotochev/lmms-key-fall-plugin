@@ -77,8 +77,9 @@ struct PressResult
 	enum class Kind : std::uint8_t
 	{
 		Hit,
-		Extra, //!< no written note of that key nearby
-		Brush  //!< a neighbouring key grazed together with a written note
+		Extra,  //!< no written note of that key nearby
+		Brush,  //!< a neighbouring key grazed together with a written note
+		Ignored //!< a note of the hand that is not being practised
 	};
 	Kind kind = Kind::Extra;
 	std::size_t note = 0; //!< chart note index for Hit
@@ -118,7 +119,9 @@ public:
 
 	//! Begins a new run at `fromTick`: notes that started before it are Skipped.
 	//! ticksPerSecond/ticksPerBeat give the tempo for converting windows to ticks.
-	void start(double fromTick, double ticksPerSecond, double ticksPerBeat);
+	//! `active` (one flag per chart note) limits the run to some notes, e.g. one hand;
+	//! the others are Skipped and pressing them is neither credited nor penalised.
+	void start(double fromTick, double ticksPerSecond, double ticksPerBeat, const std::vector<bool>* active = nullptr);
 	bool running() const { return m_running; }
 	void stop() { m_running = false; }
 	//! Follow tempo automation during a run
@@ -153,6 +156,7 @@ private:
 	std::vector<Grade> m_grades;
 	std::vector<double> m_deltaMs;     //!< per note, valid for hits
 	std::vector<std::size_t> m_chordOf; //!< chord index per note
+	std::vector<bool> m_active;         //!< empty = every note is part of the run
 	std::size_t m_chordCount = 0;
 	int m_extras = 0, m_brushes = 0;
 	int m_streak = 0, m_bestStreak = 0;

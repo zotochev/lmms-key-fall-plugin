@@ -96,8 +96,9 @@ public:
 	//! Beginner option: any one key of a chord is enough
 	void setAnyNoteCompletes(bool any) { m_anyNote = any; }
 
-	//! Restarts at the first chord at or after fromTick (and before untilTick, e.g. a loop end)
-	void reset(double fromTick, double untilTick = 1e300);
+	//! Restarts at the first chord at or after fromTick (and before untilTick, e.g. a loop end).
+	//! `active` (one flag per chart note) limits the chords to some notes, e.g. one hand.
+	void reset(double fromTick, double untilTick = 1e300, const std::vector<bool>* active = nullptr);
 
 	//! Start of the chord the user has to play, or nothing when the run is complete
 	std::optional<double> gateTick() const;
@@ -119,7 +120,10 @@ private:
 		std::vector<std::size_t> notes; //!< chart indices
 	};
 
+	void buildChords(const std::vector<bool>* active);
+
 	std::shared_ptr<const Chart> m_chart = std::make_shared<const Chart>();
+	double m_chordTicks = 0;
 	std::vector<Chord> m_chords;
 	std::size_t m_current = 0;
 	double m_until = 1e300;
@@ -128,6 +132,26 @@ private:
 	bool m_anyNote = false;
 	std::vector<Grade> m_grades;
 	Stats m_stats;
+};
+
+//! Automatic tempo for loop practice (pedagogy review): two clean passes in a row
+//! (>= 90 %) speed up by 5 %, two poor ones (< 70 %) slow down by 5 %, within 25..100 %.
+class TempoCoach
+{
+public:
+	static constexpr int Step = 5;
+	static constexpr int MinPercent = 25;
+	static constexpr int MaxPercent = 100;
+	static constexpr double GoodPass = 90;
+	static constexpr double PoorPass = 70;
+
+	//! Feeds the overall score of a finished pass; returns the tempo for the next one
+	int onPass(double overallPercent, int tempoPercent);
+	void reset() { m_good = m_poor = 0; }
+
+private:
+	int m_good = 0;
+	int m_poor = 0;
 };
 
 } // namespace kf

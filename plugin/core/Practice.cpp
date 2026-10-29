@@ -73,22 +73,31 @@ bool PracticeClock::update(std::int64_t nowNs, std::optional<double> gateTick)
 void WaitGate::setChart(std::shared_ptr<const Chart> chart, double chordTicks)
 {
 	m_chart = chart ? std::move(chart) : std::make_shared<const Chart>();
+	m_chordTicks = chordTicks;
+	reset(0);
+}
+
+void WaitGate::buildChords(const std::vector<bool>* active)
+{
 	m_chords.clear();
 	const auto& notes = m_chart->notes();
+	const bool filtered = active && active->size() == notes.size();
 	for (std::size_t i = 0; i < notes.size(); ++i)
 	{
-		if (m_chords.empty() || notes[i].start - m_chords.back().first > chordTicks)
+		if (filtered && !(*active)[i]) { continue; }
+		if (m_chords.empty() || notes[i].start - m_chords.back().first > m_chordTicks)
 		{
 			m_chords.push_back({notes[i].start, {}});
 		}
 		m_chords.back().notes.push_back(i);
 	}
-	reset(0);
 }
 
-void WaitGate::reset(double fromTick, double untilTick)
+void WaitGate::reset(double fromTick, double untilTick, const std::vector<bool>* active)
 {
-	m_grades.assign(m_chart->notes().size(), Grade::Pending);
+	buildChords(active);
+	// Notes outside the run (other hand, before the start, after the loop) are Skipped
+	m_grades.assign(m_chart->notes().size(), Grade::Skipped);
 	m_current = static_cast<std::size_t>(std::lower_bound(m_chords.begin(), m_chords.end(), fromTick,
 		[](const Chord& c, double t) { return c.first < t; }) - m_chords.begin());
 	m_until = untilTick;
@@ -96,13 +105,9 @@ void WaitGate::reset(double fromTick, double untilTick)
 	m_currentHadWrong = false;
 	m_stats = {};
 	for (std::size_t c = m_current; c < m_chords.size() && m_chords[c].first < m_until; ++c) { ++m_stats.chords; }
-	// Notes outside the run are not part of it
-	for (std::size_t c = 0; c < m_chords.size(); ++c)
+	for (std::size_t c = m_current; c < m_chords.size() && m_chords[c].first < m_until; ++c)
 	{
-		if (c < m_current || m_chords[c].first >= m_until)
-		{
-			for (const auto i : m_chords[c].notes) { m_grades[i] = Grade::Skipped; }
-		}
+		for (const auto i : m_chords[c].notes) { m_grades[i] = Grade::Pending; }
 	}
 }
 
@@ -147,6 +152,27 @@ bool WaitGate::press(int key)
 WaitGate::Stats WaitGate::stats() const
 {
 	return m_stats;
+}
+
+// --- TempoCoach -------------------------------------------------------------
+
+int TempoCoach::onPass(double overallPercent, int tempoPercent)
+{
+	if (overallPercent >= GoodPass) { ++m_good; m_poor = 0; }
+	else if (overallPercent < PoorPass) { ++m_poor; m_good = 0; }
+	else { m_good = m_poor = 0; }
+
+	if (m_good >= 2)
+	{
+		m_good = 0;
+		return std::min(MaxPercent, tempoPercent + Step);
+	}
+	if (m_poor >= 2)
+	{
+		m_poor = 0;
+		return std::max(MinPercent, tempoPercent - Step);
+	}
+	return tempoPercent;
 }
 
 } // namespace kf

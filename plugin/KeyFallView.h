@@ -111,6 +111,7 @@ private:
 	std::optional<kf::PracticeClock::Loop> practiceLoop() const;
 	void updateLoopRange();
 	void playClick(bool downbeat);
+	void practiseBar(int songBar);
 
 	KeyFall* m_plugin;
 	QComboBox* m_clipCombo;
@@ -158,6 +159,10 @@ private:
 	bool m_runIsWait = false;
 	QToolButton* m_practiceButton = nullptr;
 	QCheckBox* m_waitCheck = nullptr;
+	QCheckBox* m_anyNoteCheck = nullptr;
+	QCheckBox* m_autoTempoCheck = nullptr;
+	kf::TempoCoach m_tempoCoach;
+	QString m_hudNote; //!< e.g. "tempo 80 % -> 85 %" after a loop pass
 	QSpinBox* m_tempoSpin = nullptr;
 	QCheckBox* m_loopCheck = nullptr;
 	QSpinBox* m_loopFrom = nullptr;
