@@ -81,7 +81,7 @@ public:
 
 ## 2. Этапы
 
-### Этап 1. Сборка LMMS из исходников — ✅ Windows (2026-10-28)
+### Этап 1. Сборка LMMS из исходников — ✅ Windows (2026-10-28), ✅ Linux (WSL Ubuntu 24.04, 2026-10-29)
 
 **Итог на Windows:**
 - LMMS лежит в `C:\Users\mikhail\Projects\lmms`, ветка `keyfall` от коммита `bed447b`.

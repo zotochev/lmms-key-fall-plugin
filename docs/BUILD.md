@@ -143,18 +143,16 @@ On Windows the script calls `winmm.dll` directly. The only extra package is `mid
 
 ---
 
-## Linux (Ubuntu 24.04) — not yet tested
+## Linux (Ubuntu 24.04)
 
-The package list is taken from the LMMS CI (`.github/workflows/deps-ubuntu-24.04-gcc.txt`). This is the minimum we need:
+Tested 2026-10-29 in WSL 2 (Ubuntu 24.04.4, GCC 13, Qt 5.15):
+- the KeyFall core builds with `-Wall -Wextra -Wpedantic` without warnings, and all test sets pass;
+- LMMS with the plugin builds, starts and loads `libkeyfall.so`; this was checked by an offscreen launch.
+
+Dependencies come from the LMMS CI list, trimmed to what we need. One command (needs `sudo`):
 
 ```bash
-sudo apt-get install -y --no-install-recommends \
-  build-essential cmake git pkg-config ccache \
-  qtbase5-dev qtbase5-private-dev qtbase5-dev-tools qttools5-dev-tools libqt5svg5-dev libqt5x11extras5-dev \
-  libasound2-dev libjack-jackd2-dev portaudio19-dev libsdl2-dev \
-  libsndfile1-dev libfftw3-dev libsamplerate0-dev libvorbis-dev libogg-dev libmp3lame-dev \
-  libfluidsynth-dev liblilv-dev lv2-dev libstk-dev stk \
-  libx11-xcb-dev libxcb-keysyms1-dev libxcb-util0-dev libxft-dev libxinerama-dev
+sudo sh scripts/linux-deps.sh
 ```
 
 ```bash
@@ -170,7 +168,16 @@ cmake --build build -j"$(nproc)"
 ```
 
 On Linux you only need patch `0002`; the MSVC patch is not needed.
-To test without a keyboard: `pip install mido python-rtmidi`, then `python scripts/virtual_player.py chords`. Without `--port` the script creates its own ALSA port, `KeyFall Virtual Player`; connect it to LMMS in the track's MIDI → Input menu.
+
+KeyFall core tests without LMMS:
+
+```bash
+cmake -S tests -B build-tests && cmake --build build-tests -j"$(nproc)" && ctest --test-dir build-tests
+```
+
+**WSL.** Build on the Linux file system (`~/...`), not under `/mnt/c`, because it is many times faster. The plugin can still stay in the Windows copy of the repository: make the link absolute, e.g. `ln -s /mnt/c/Users/<you>/Projects/key-fall/plugin plugins/KeyFall`. WSLg shows the LMMS window. WSL has no sound card or ALSA MIDI, so ALSA messages at startup are expected.
+
+To test without a keyboard: `pip install mido python-rtmidi`, then `python scripts/virtual_player.py chords`. Without `--port` the script creates its own ALSA port, `KeyFall Virtual Player`; connect it to LMMS in the track's MIDI → Input menu. This needs a real Linux machine with ALSA, not WSL.
 
 ---
 
