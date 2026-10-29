@@ -86,7 +86,7 @@ public:
 **Итог на Windows:**
 - LMMS лежит в `C:\Users\mikhail\Projects\lmms`, ветка `keyfall` от коммита `bed447b`.
 - Окружение: VS 2022 (MSVC 19.41), Qt 6.8.3 в `C:\Qt`, vcpkg в `C:\vcpkg`.
-- Upstream требует MSVC 19.51 (VS 2026) только формальной проверкой. В `cmake/modules/DetectMachine.cmake` стоит локальный патч, который разрешает VS 2022.
+- Upstream требует MSVC 19.51 (VS 2026) только формальной проверкой. Проверку для VS 2022 ослабляет локальный коммит в ветке `keyfall` клона LMMS; в репозитории KeyFall этого патча нет (убран 2026-10-29, другим он не нужен).
 - Сборка и запуск: `scripts\lmms.cmd configure|build|run`. Dev-сборка берёт отдельный конфиг `dev/lmmsrc-dev.xml`, в нём автоподключение MIDI-порта `lmms`.
 - Без клавиатуры: виртуальный кабель loopMIDI (порт `lmms`) и `scripts/virtual_player.py`. Скрипт играет гамму, аккорды или .mid и может добавлять ошибки по времени и высоте.
 - Linux ещё не собран.
@@ -103,7 +103,7 @@ public:
 
 **Итог:**
 - Код плагина лежит в `plugin/`. В дереве LMMS он подключён junction-ссылкой `plugins/KeyFall`.
-- Патч `patches/lmms-0002` добавляет плагин в `PluginList.cmake` и экспортирует `MidiPort`, `MidiClient`, `MidiPortMenu`. Линковка с `MidiPort` проверена: модель уже владеет входным портом, подписок у него пока нет.
+- ~~Патч `patches/lmms-0002`~~ (добавлял плагин в `PluginList.cmake` и экспортировал MIDI-классы) убран 2026-10-29: MIDI теперь идёт через сигналы треков, плагин попадает в сборку через `-DPLUGIN_LIST`.
 - Окно: тулбар с выбором клипа (пока заглушка), счётчиком MIDI-входов и меню ⚙ с настройкой «Timing tolerance» (Loose / Normal / Strict, по умолчанию Normal, сохраняется в конфиге LMMS). Под ним заглушки области падающих нот и клавиатуры (18% высоты, от 70 до 140 px). Минимальный размер 480×320, по умолчанию 900×560.
 - [ ] Скопировать `plugins/TapTempo` как шаблон → `plugins/KeyFall`. Дескриптор `Plugin::Type::Tool`, `lmms_plugin_main`, `BUILD_PLUGIN(keyfall … MOCFILES … EMBEDDED_RESOURCES logo.png)`.
 - [ ] Добавить `KeyFall` в `LMMS_PLUGIN_LIST` в `cmake/modules/PluginList.cmake`.

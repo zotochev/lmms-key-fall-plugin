@@ -5,14 +5,14 @@ This guide sets up the environment from scratch. LMMS is built from source, and 
 | Parameter | Value |
 |---|---|
 | LMMS | `master`, pinned to commit `bed447baab187ea6292449048e0b1aab16082e3b` (2026-10-25), local branch `keyfall` |
-| Windows | MSVC (VS 2022 17.11+ or VS 2026) + vcpkg + Qt 6.8 |
+| Windows | MSVC (VS 2026, as LMMS master requires) + vcpkg + Qt 6.8 |
 | Linux | GCC + Qt 5.15 from the distro packages |
 | Disk space | ~15 GB (vcpkg dependencies make up most of it) |
 
 Directory layout: the two repositories live **side by side**.
 ```
 Projects/
-  key-fall/   ← this repository: plan, scripts, patches, and later the plugin code
+  key-fall/   ← this repository: plugin code, scripts, docs
   lmms/       ← LMMS source code (separate git repository)
 ```
 
@@ -20,11 +20,11 @@ Projects/
 
 ## Windows
 
-The steps below were tested on Windows 11, VS 2022 17.11 (MSVC 19.41) and Qt 6.8.3.
+The steps below were tested on Windows 11 with Qt 6.8.3.
 
 ### 1. Tools
 
-1. **Visual Studio 2022 or 2026** (Community or Build Tools), with the **Desktop development with C++** workload. It must include:
+1. **Visual Studio 2026** (Community or Build Tools), with the **Desktop development with C++** workload. It must include:
    - MSVC x64/x86 build tools
    - Windows 11 SDK
    - C++ CMake tools for Windows (this installs CMake and Ninja; you don't need to install them separately)
@@ -52,7 +52,7 @@ C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
 
 You need exactly this standalone clone. The copy of vcpkg bundled with Visual Studio doesn't fit, because it requires `builtin-baseline` in the manifest, and LMMS's `vcpkg.json` doesn't have one.
 
-### 4. LMMS source and the patch
+### 4. LMMS source
 
 ```bat
 cd C:\Users\<you>\Projects
@@ -62,15 +62,7 @@ git checkout -b keyfall bed447baab187ea6292449048e0b1aab16082e3b
 git submodule update --init --recursive
 ```
 
-KeyFall needs no changes to LMMS: it uses only classes LMMS already exports, and it gets into the build through `-DPLUGIN_LIST`. The one patch is for the compiler:
-
-```bat
-git apply ..\key-fall\patches\lmms-0001-allow-msvc-2022.patch
-```
-
-| Patch | Why |
-|---|---|
-| `0001-allow-msvc-2022` | **VS 2022 only.** LMMS master requires MSVC 19.51 (VS 2026). The source code doesn't need it; the restriction is a version check in CMake. Skip this patch if you have VS 2026 |
+KeyFall needs no changes to LMMS: it uses only classes LMMS already exports, and it gets into the build through `-DPLUGIN_LIST`.
 
 The plugin code itself is not copied into LMMS. On the first run, `scripts\lmms.cmd configure` creates the junction `lmms\plugins\KeyFall → key-fall\plugin`. To keep `git status` in LMMS clean, add it to the exclusions once:
 
@@ -105,7 +97,7 @@ Default paths can be overridden with environment variables:
 | `KEYFALL_VCPKG` | `C:\vcpkg` |
 | `QT_DIR` | `C:\Qt\6.8.3\msvc2022_64` |
 
-In `scripts\lmms.cmd` the Visual Studio path is set to `...\2022\Community`. For Build Tools or VS 2026, change `VS_DIR`.
+`scripts\lmms.cmd` finds the newest Visual Studio with the C++ tools through `vswhere`. To use another installation, set `VS_DIR` to its folder.
 
 After building, KeyFall opens from the **Tools → KeyFall** menu.
 
@@ -183,7 +175,7 @@ To test without a keyboard: `pip install mido python-rtmidi`, then `python scrip
 |---|---|
 | `'vswhere.exe' is not recognized`, then `CMAKE_CXX_COMPILER not set` | `vcvars64.bat` can't find vswhere. `lmms.cmd` already adds `...\Microsoft Visual Studio\Installer` to PATH |
 | `this vcpkg instance requires a manifest with a specified baseline` | The Visual Studio vcpkg was picked up (`vcvars` overrides `VCPKG_ROOT`). Use the clone in `C:\vcpkg`; the script points the toolchain at it explicitly |
-| `Unsupported MSVC version '19.41…'. MSVC 19.51 or higher is required` | Apply `patches/lmms-0001-allow-msvc-2022.patch` or install VS 2026 |
+| `Unsupported MSVC version '19.41…'. MSVC 19.51 or higher is required` | LMMS master accepts only VS 2026. The check is in LMMS's `cmake/modules/DetectMachine.cmake`; the code itself also builds with VS 2022 if you relax it locally |
 | After a failed `configure`, things keep failing | Delete `lmms\build` (the vcpkg packages stay in the `C:\vcpkg` cache) |
 | `lmms.exe` won't start, a DLL is missing | Start it through `scripts\lmms.cmd run`; it adds `build\vcpkg_installed\x64-windows\bin` and Qt to PATH |
 | LMMS doesn't see the loopMIDI port | The port was created after LMMS started. Restart LMMS |

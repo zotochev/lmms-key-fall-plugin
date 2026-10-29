@@ -7,9 +7,10 @@ if "%LMMS_SRC%"==""  set "LMMS_SRC=%USERPROFILE%\Projects\lmms"
 if "%LMMS_BUILD%"=="" set "LMMS_BUILD=%LMMS_SRC%\build"
 if "%KEYFALL_VCPKG%"=="" set "KEYFALL_VCPKG=C:\vcpkg"
 if "%QT_DIR%"==""    set "QT_DIR=C:\Qt\6.8.3\msvc2022_64"
-set "VS_DIR=C:\Program Files\Microsoft Visual Studio\2022\Community"
-
 set "PATH=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer;%PATH%"
+rem Newest Visual Studio with the C++ tools, unless VS_DIR is set
+if "%VS_DIR%"=="" for /f "usebackq delims=" %%i in (`vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_DIR=%%i"
+if "%VS_DIR%"=="" (echo Visual Studio with C++ tools not found; set VS_DIR & exit /b 1)
 call "%VS_DIR%\VC\Auxiliary\Build\vcvars64.bat" >nul
 where cl >nul 2>&1 || (echo MSVC environment not initialised & exit /b 1)
 rem vcvars points VCPKG_ROOT at the VS-bundled vcpkg; LMMS needs the classic clone.
